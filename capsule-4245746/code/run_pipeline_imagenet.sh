@@ -2,29 +2,34 @@
 set -e  # Exit on any error
 
 echo "=========================================================================="
-echo "Starting FULL PURSUhInT + CMTF Pipeline for ImageNet"
-echo "  (Hints -> Clustering -> Dual Student Training -> Evaluation)"
+echo "Starting FULL PURSUhInT + CMTF Pipeline for ImageNet-100"
+echo "  (Teacher -> Hints -> Clustering -> Dual Student Training -> Evaluation)"
 echo "=========================================================================="
 
 # ==============================================================================
 # Configuration  (edit these to match your environment)
 # ==============================================================================
 PYTHON="python3"                     # or: /path/to/venv/bin/python
-DATASET="imagenet"
+DATASET="imagenet100"
 MODEL_T="ResNet34"
 MODEL_S="ResNet18"
 NUM_LAYERS=16                        # ResNet34 has 16 BasicBlock sub-blocks
 NUM_CLUSTERS=4                       # 4 hint points for ImageNet experiments
 METRIC="r2"
-EPOCHS=100
+TEACHER_EPOCHS=100
+STUDENT_EPOCHS=100
 BATCH=128                            # Lowered from 256 to prevent 24GB VRAM OOM
 NUM_WORKERS=4
 LR=0.1
+WEIGHT_DECAY=0.0001
 
 # Paths
-IMAGENET_DIR="/path/to/imagenet"     # must contain train/ and val/ subdirs
-TEACHER_PATH="./save/models/ResNet34_imagenet/ResNet34_333f7ec4.pth" # Ensure this matches your actual file
-HINTS_DIR="./save/hints/ResNet34_imagenet"
+IMAGENET_DIR="/path/to/imagenet100"  # must contain train/ and val/ subdirs
+
+# Teacher output path (auto-derived from train_teacher_imagenet100.py naming convention)
+TEACHER_SAVE_DIR="./save/models/${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_DECAY}_trial_0"
+TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_last.pth"
+HINTS_DIR="./save/hints/${MODEL_T}_imagenet100"
 
 # Student training loss weights
 GAMMA=2.5
@@ -41,6 +46,7 @@ echo "Log file: ${LOG}"
 # ==============================================================================
 # Flags  (set to 1 to enable, 0 to skip a step)
 # ==============================================================================
+RUN_TEACHER=1
 RUN_HINTS=1
 RUN_CLUSTERING=1
 RUN_TRAINING=1
@@ -50,34 +56,63 @@ RUN_EVALUATION=1
 USE_NO_DALI=0
 
 # ==============================================================================
-# [1/4] PURSUhInT Step 1: Extract layer representations
+# [1/5] Train Teacher
+# ==============================================================================
+if [ "$RUN_TEACHER" -eq 1 ]; then
+    echo "[1/5] Training Teacher (${MODEL_T}) on ${DATASET}..."
+    echo "[1/5] Training Teacher (${MODEL_T}) on ${DATASET}..." >> "${LOG}" 2>&1
+
+    ${PYTHON} train_teacher_imagenet100.py \
+        --model ${MODEL_T} \
+        --data_folder "${IMAGENET_DIR}" \
+        --epochs ${TEACHER_EPOCHS} \
+        --batch_size ${BATCH} \
+        --learning_rate ${LR} \
+        --weight_decay ${WEIGHT_DECAY} \
+        --lr_decay_epochs 30,60,90 \
+        --num_workers ${NUM_WORKERS} >> "${LOG}" 2>&1 || { echo "ERROR: Teacher training failed. Check ${LOG}."; exit 1; }
+
+    echo "Teacher training complete." >> "${LOG}"
+else
+    echo "[1/5] SKIPPED (RUN_TEACHER=0)"
+fi
+
+# Verify teacher checkpoint exists before proceeding
+if [ ! -f "${TEACHER_PATH}" ]; then
+    echo "ERROR: Teacher checkpoint not found: ${TEACHER_PATH}"
+    echo "  Either run teacher training (RUN_TEACHER=1) or update TEACHER_PATH."
+    exit 1
+fi
+
+# ==============================================================================
+# [2/5] PURSUhInT Step 1: Extract layer representations
 # ==============================================================================
 if [ "$RUN_HINTS" -eq 1 ]; then
-    echo "[1/4] Storing ${NUM_LAYERS} teacher layer representations..."
-    echo "[1/4] Storing teacher layer representations (${NUM_LAYERS} sub-blocks)..." >> "${LOG}" 2>&1
+    echo "[2/5] Storing ${NUM_LAYERS} teacher layer representations..."
+    echo "[2/5] Storing teacher layer representations (${NUM_LAYERS} sub-blocks)..." >> "${LOG}" 2>&1
 
     for i in $(seq 1 ${NUM_LAYERS}); do
         echo "  Extracting hint ${i} / ${NUM_LAYERS}..."
-        ${PYTHON} store_hints_imagenet.py \
+        ${PYTHON} store_hints_imagenet100.py \
             --g ${i} \
             --model_t ${MODEL_T} \
             --t_path "${TEACHER_PATH}" \
             --hints_path "${HINTS_DIR}" \
             --data_folder "${IMAGENET_DIR}" \
             --batch_size ${BATCH} \
-            --num_workers ${NUM_WORKERS} >> "${LOG}" 2>&1 || { echo "ERROR: store_hints_imagenet.py failed on layer ${i}. Check ${LOG}."; exit 1; }
+            --num_workers ${NUM_WORKERS} >> "${LOG}" 2>&1 || { echo "ERROR: store_hints_imagenet100.py failed on layer ${i}. Check ${LOG}."; exit 1; }
     done
     echo "Layer representation extraction complete." >> "${LOG}"
 else
-    echo "[1/4] SKIPPED (RUN_HINTS=0)"
+    echo "[2/5] SKIPPED (RUN_HINTS=0)"
 fi
 
 # ==============================================================================
-# [2/4] PURSUhInT Step 2: Cluster representations with K-Means
+# [3/5] PURSUhInT Step 2: Cluster representations with K-Means
 # ==============================================================================
 if [ "$RUN_CLUSTERING" -eq 1 ]; then
-    echo "[2/4] Clustering layer representations with ${METRIC} (${NUM_CLUSTERS} clusters)..."
-    echo "[2/4] Running K-Means clustering..." >> "${LOG}" 2>&1
+    echo "[3/5] Clustering layer representations with ${METRIC} (${NUM_CLUSTERS} clusters)..."
+    echo "[3/5] Running K-Means clustering..." >> "${LOG}" 2>&1
 
     ${PYTHON} k_means.py \
         --hints_dir "${HINTS_DIR}" \
@@ -97,18 +132,18 @@ if [ "$RUN_CLUSTERING" -eq 1 ]; then
     HINT_POINTS=$(cat "${CENTROID_FILE}")
     echo "PURSUhInT selected hint points: ${HINT_POINTS}" | tee -a "${LOG}"
 else
-    echo "[2/4] SKIPPED (RUN_CLUSTERING=0)"
+    echo "[3/5] SKIPPED (RUN_CLUSTERING=0)"
     # If skipping clustering, provide hint points manually here:
     HINT_POINTS="3,7,13,16"
     echo "Using default hint points: ${HINT_POINTS}"
 fi
 
 # ==============================================================================
-# [3/4] Train Dual Students (CP + Tucker) using discovered hint points
+# [4/5] Train Dual Students (CP + Tucker) using discovered hint points
 # ==============================================================================
 if [ "$RUN_TRAINING" -eq 1 ]; then
-    echo "[3/4] Training Dual Students (${MODEL_S}) with hint points: ${HINT_POINTS}..."
-    echo "[3/4] Training students with hint_points=${HINT_POINTS}..." >> "${LOG}" 2>&1
+    echo "[4/5] Training Dual Students (${MODEL_S}) with hint points: ${HINT_POINTS}..."
+    echo "[4/5] Training students with hint_points=${HINT_POINTS}..." >> "${LOG}" 2>&1
 
     DALI_FLAG=""
     if [ "$USE_NO_DALI" -eq 1 ]; then
@@ -119,13 +154,13 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
     # Number of GPUs to use for training
     NUM_GPUS=1
 
-    ${PYTHON} -m torch.distributed.launch --master_port 9200 --nproc_per_node=${NUM_GPUS} train_stu_imagenet.py \
+    ${PYTHON} -m torch.distributed.launch --master_port 9200 --nproc_per_node=${NUM_GPUS} train_stu_imagenet100.py \
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
         --distill pursuhint_cmtf \
         --dual_cmtf \
-        --epochs ${EPOCHS} \
+        --epochs ${STUDENT_EPOCHS} \
         --lr ${LR} \
         --batch-size ${BATCH} \
         --workers ${NUM_WORKERS} \
@@ -139,17 +174,17 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
 
     echo "Student training complete." >> "${LOG}"
 else
-    echo "[3/4] SKIPPED (RUN_TRAINING=0)"
+    echo "[4/5] SKIPPED (RUN_TRAINING=0)"
 fi
 
 # ==============================================================================
-# [4/4] Evaluation
+# [5/5] Evaluation
 # ==============================================================================
 if [ "$RUN_EVALUATION" -eq 1 ]; then
-    echo "[4/4] Running Evaluation Metrics..."
-    echo "[4/4] Running evaluation..." >> "${LOG}" 2>&1
+    echo "[5/5] Running Evaluation Metrics..."
+    echo "[5/5] Running evaluation..." >> "${LOG}" 2>&1
 
-    STUDENT_DIR="./save/student_model/imagenet/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_cmtf_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_cmtf_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \
@@ -159,7 +194,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --path_s_cp "${STUDENT_DIR}/${MODEL_S}_last_cp.pth" \
         --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_last_tucker.pth" >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
-    echo "[4/4] SKIPPED (RUN_EVALUATION=0)"
+    echo "[5/5] SKIPPED (RUN_EVALUATION=0)"
 fi
 
 # ==============================================================================
