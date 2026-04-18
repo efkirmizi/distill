@@ -4,15 +4,20 @@ echo ==========================================================================
 echo Starting FULL PURSUhInT + CMTF Pipeline (Teacher - Hints - Student - Eval)
 echo ==========================================================================
 
-set PYTHON=C:\Users\PC\Desktop\Bitirme\.venv\Scripts\python.exe
+if not exist ".\save\logs" mkdir ".\save\logs"
+if not exist ".\save\hints" mkdir ".\save\hints"
+if not exist ".\save\models" mkdir ".\save\models"
+if not exist ".\save\student_model" mkdir ".\save\student_model"
+
+set PYTHON=..\..\.venv\Scripts\python.exe
 set DATASET=cifar100
 set MODEL_T=wrn_40_2
 set MODEL_S=wrn_16_2
-set LOG=C:\Users\PC\Desktop\Bitirme\capsule-4245746\code\save\logs\%MODEL_T%_%DATASET%_log.txt
+set LOG=.\save\logs\%MODEL_T%_%DATASET%_log.txt
 set NUM_LAYERS=18
 set NUM_CLUSTERS=3
 set METRIC=r2
-set EPOCHS=240
+set EPOCHS=1
 set LEARNING_RATE=0.1
 set LR_DECAY_EPOCHS=60,120,160
 set BATCH=64

@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e  # Exit on any error
 
+mkdir -p ./save/logs
+mkdir -p ./save/hints
+mkdir -p ./save/models
+mkdir -p ./save/student_model
+
 echo "=========================================================================="
 echo "Starting FULL PURSUhInT + CMTF Pipeline for ImageNet-100"
 echo "  (Teacher -> Hints -> Clustering -> Dual Student Training -> Evaluation)"
@@ -18,13 +23,13 @@ NUM_CLUSTERS=4                       # 4 hint points for ImageNet experiments
 METRIC="r2"
 TEACHER_EPOCHS=100
 STUDENT_EPOCHS=100
-BATCH=128                            # Lowered from 256 to prevent 24GB VRAM OOM
-NUM_WORKERS=4
+BATCH=256                            # Lowered from 256 to prevent 24GB VRAM OOM
+NUM_WORKERS=8
 LR=0.1
 WEIGHT_DECAY=0.0001
 
 # Paths
-IMAGENET_DIR="/path/to/imagenet100"  # must contain train/ and val/ subdirs
+IMAGENET_DIR="data/imagenet100"  # must contain train/ and val/ subdirs
 
 # Teacher output path (auto-derived from train_teacher_imagenet100.py naming convention)
 TEACHER_SAVE_DIR="./save/models/${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_DECAY}_trial_0"
