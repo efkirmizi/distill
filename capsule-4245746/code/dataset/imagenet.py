@@ -14,7 +14,9 @@ def get_data_folder():
     """
     return server-dependent path to store the data
     """
-    data_folder = '../data/imagenet100'
+    # Dynamically grab the 'dataset' folder's exact location, then target 'data/imagenet100'
+    this_file_dir = os.path.dirname(os.path.abspath(__file__))
+    data_folder = os.path.abspath(os.path.join(this_file_dir, '../data/imagenet100'))
 
     if not os.path.isdir(data_folder):
         os.makedirs(data_folder)
