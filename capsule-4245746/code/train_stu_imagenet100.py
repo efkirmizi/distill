@@ -157,7 +157,7 @@ def parse():
                         help='Runs CPU based version of DALI pipeline')
 
     # DDP / Apex
-    parser.add_argument("--local_rank", default=0, type=int)
+    parser.add_argument('--local_rank', 'local-rank', default=0, type=int)
     parser.add_argument('--sync_bn', action='store_true',
                         help='enabling apex sync BN')
     parser.add_argument('--opt-level', type=str, default=None)

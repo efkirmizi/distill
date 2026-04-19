@@ -21,6 +21,7 @@ from thop import profile, clever_format
 from models import model_dict
 from dataset.cifar100 import get_cifar100_dataloaders
 from dataset.cifar10 import get_cifar10_dataloaders
+from dataset.imagenet import get_imagenet_dataloader
 from helper.loops import validate
 from helper.util import AverageMeter, accuracy
 from for_init import remove_module, add_module
@@ -32,7 +33,7 @@ def parse_option():
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='cifar10',
-                        choices=['cifar100', 'cifar10'],
+                        choices=['cifar100', 'cifar10', 'imagenet100'],
                         help='dataset used for evaluation')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--num_workers', type=int, default=4, help='dataloader workers')
@@ -68,7 +69,7 @@ def measure_model(model, dataset='cifar10', device='cpu'):
     """Measure parameter count, FLOPs, and inference latency."""
     model.eval()
 
-    if dataset == 'imagenet':
+    if 'imagenet' in dataset:
         input_size = (1, 3, 224, 224)
     else:
         input_size = (1, 3, 32, 32)
@@ -169,12 +170,16 @@ def evaluate():
     # ----- Dataset -----
     if opt.dataset == 'cifar100':
         _, val_loader = get_cifar100_dataloaders(batch_size=opt.batch_size,
-                                                  num_workers=opt.num_workers)
+                                                 num_workers=opt.num_workers)
         n_cls = 100
     elif opt.dataset == 'cifar10':
         _, val_loader = get_cifar10_dataloaders(batch_size=opt.batch_size,
                                                  num_workers=opt.num_workers)
         n_cls = 10
+    elif opt.dataset == 'imagenet100':
+        _, val_loader = get_imagenet_dataloader(batch_size=opt.batch_size,
+                                                 num_workers=opt.num_workers)
+        n_cls = 100
     else:
         raise NotImplementedError(opt.dataset)
 
