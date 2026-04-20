@@ -552,19 +552,46 @@ def main():
 
     # ---- Resume ----
     if args.resume:
-        if os.path.isfile(args.resume):
+        if os.path.isdir(args.resume):
+            cp_path = os.path.join(args.resume, 'checkpoint_cp.pth.tar')
+            tk_path = os.path.join(args.resume, 'checkpoint_tucker.pth.tar')
+            
+            # 1. Load CP Student
+            if os.path.isfile(cp_path):
+                print("=> loading CP checkpoint '{}'".format(cp_path))
+                ckpt_cp = torch.load(cp_path, map_location=lambda storage, loc: storage.cuda(args.gpu))
+                args.start_epoch = ckpt_cp['epoch']
+                best_prec1 = ckpt_cp.get('best_prec1', 0.0)
+                model_s.load_state_dict(ckpt_cp['state_dict'])
+                optimizer.load_state_dict(ckpt_cp['optimizer'])
+                print("=> loaded CP checkpoint (epoch {})".format(ckpt_cp['epoch']))
+            else:
+                print("=> no CP checkpoint found at '{}'".format(cp_path))
+                
+            # 2. Load Tucker Student
+            if args.dual_cmtf:
+                if os.path.isfile(tk_path):
+                    print("=> loading Tucker checkpoint '{}'".format(tk_path))
+                    ckpt_tk = torch.load(tk_path, map_location=lambda storage, loc: storage.cuda(args.gpu))
+                    best_prec1_2 = ckpt_tk.get('best_prec1', 0.0)
+                    model_s2.load_state_dict(ckpt_tk['state_dict'])
+                    optimizer_2.load_state_dict(ckpt_tk['optimizer'])
+                    print("=> loaded Tucker checkpoint (epoch {})".format(ckpt_tk['epoch']))
+                else:
+                    print("=> no Tucker checkpoint found at '{}'".format(tk_path))
+                    
+        elif os.path.isfile(args.resume):
+            # Fallback for standard single-student distillation
             print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume,
-                                    map_location=lambda storage, loc: storage.cuda(args.gpu))
+            checkpoint = torch.load(args.resume, map_location=lambda storage, loc: storage.cuda(args.gpu))
             args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
+            best_prec1 = checkpoint.get('best_prec1', 0.0)
             model_s.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})".format(
-                args.resume, checkpoint['epoch']))
+            print("=> loaded checkpoint (epoch {})".format(checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
-
+    
     # ---- Data loading ----
     if len(args.data) == 1:
         traindir = os.path.join(args.data[0], 'train')
