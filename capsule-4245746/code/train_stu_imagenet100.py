@@ -348,9 +348,9 @@ def get_loader_len(loader, batch_size, use_dali):
 #  MAIN
 # ==================================================================================
 def main():
-    global best_prec1, best_prec1_2, args
-    best_prec1 = 0
-    best_prec1_2 = 0
+    global best_acc1, best_acc1_2, args
+    best_acc1 = 0
+    best_acc1_2 = 0
     args = parse()
 
     # ---- Test mode ----
@@ -538,6 +538,11 @@ def main():
                                             opt_level=args.opt_level,
                                             keep_batchnorm_fp32=args.keep_batchnorm_fp32,
                                             loss_scale=args.loss_scale)
+        if args.dual_cmtf:
+            model_s2, optimizer_2 = amp.initialize(model_s2, optimizer_2,
+                                                   opt_level=args.opt_level,
+                                                   keep_batchnorm_fp32=args.keep_batchnorm_fp32,
+                                                   loss_scale=args.loss_scale)
         if teacher is not None:
             teacher = amp.initialize(teacher, opt_level=args.opt_level,
                                      keep_batchnorm_fp32=args.keep_batchnorm_fp32,
@@ -547,9 +552,11 @@ def main():
     if args.distributed:
         print('distributed training..')
         model_s = DDP(model_s, delay_allreduce=True)
+        if args.dual_cmtf:
+            model_s2 = DDP(model_s2, delay_allreduce=True)
         if teacher is not None:
             teacher = DDP(teacher, delay_allreduce=True)
-
+    
     # ---- Resume ----
     if args.resume:
         if os.path.isdir(args.resume):
@@ -561,7 +568,7 @@ def main():
                 print("=> loading CP checkpoint '{}'".format(cp_path))
                 ckpt_cp = torch.load(cp_path, map_location=lambda storage, loc: storage.cuda(args.gpu))
                 args.start_epoch = ckpt_cp['epoch']
-                best_prec1 = ckpt_cp.get('best_prec1', 0.0)
+                best_acc1 = ckpt_cp.get('best_acc1', 0.0)
                 model_s.load_state_dict(ckpt_cp['state_dict'])
                 optimizer.load_state_dict(ckpt_cp['optimizer'])
                 print("=> loaded CP checkpoint (epoch {})".format(ckpt_cp['epoch']))
@@ -573,7 +580,7 @@ def main():
                 if os.path.isfile(tk_path):
                     print("=> loading Tucker checkpoint '{}'".format(tk_path))
                     ckpt_tk = torch.load(tk_path, map_location=lambda storage, loc: storage.cuda(args.gpu))
-                    best_prec1_2 = ckpt_tk.get('best_prec1', 0.0)
+                    best_acc1_2 = ckpt_tk.get('best_acc1', 0.0)
                     model_s2.load_state_dict(ckpt_tk['state_dict'])
                     optimizer_2.load_state_dict(ckpt_tk['optimizer'])
                     print("=> loaded Tucker checkpoint (epoch {})".format(ckpt_tk['epoch']))
@@ -585,7 +592,7 @@ def main():
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume, map_location=lambda storage, loc: storage.cuda(args.gpu))
             args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint.get('best_prec1', 0.0)
+            best_acc1 = checkpoint.get('best_acc1', 0.0)
             model_s.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint (epoch {})".format(checkpoint['epoch']))
@@ -637,7 +644,10 @@ def main():
             traindir, valdir, batch_size=args.batch_size, num_workers=args.workers)
 
     if args.evaluate:
-        validate(val_loader, model_s, criterion_cls)
+        if args.dual_cmtf:
+            validate(val_loader, model_s, criterion_cls, model_s2=model_s2)
+        else:
+            validate(val_loader, model_s, criterion_cls)
         return
 
     # ---- Print model info ----
@@ -651,19 +661,25 @@ def main():
             sum(p.numel() for p in model_s2.parameters())))
 
     # ---- CSV Logger Setup ----
+    file_mode = 'a' if args.resume else 'w'
+
     csv_path_cp = os.path.join(args.save_folder, 'training_log_cp.csv')
-    csv_file_cp = open(csv_path_cp, 'w', newline='')
+    write_header_cp = not os.path.exists(csv_path_cp) or not args.resume
+    csv_file_cp = open(csv_path_cp, file_mode, newline='')
     csv_writer_cp = csv.writer(csv_file_cp)
-    csv_writer_cp.writerow(['epoch', 'lr', 'train_loss', 'train_prec1', 'train_prec5',
-                            'val_prec1', 'val_prec5', 'best_prec1'])
+    if write_header_cp:
+        csv_writer_cp.writerow(['epoch', 'lr', 'train_loss', 'train_acc1', 'train_acc5',
+                            'val_acc1', 'val_acc5', 'best_acc1'])
     print(f'CSV log: {csv_path_cp}')
 
     if args.dual_cmtf:
         csv_path_tk = os.path.join(args.save_folder, 'training_log_tucker.csv')
-        csv_file_tk = open(csv_path_tk, 'w', newline='')
+        write_header_tk = not os.path.exists(csv_path_tk) or not args.resume
+        csv_file_tk = open(csv_path_tk, file_mode, newline='')
         csv_writer_tk = csv.writer(csv_file_tk)
-        csv_writer_tk.writerow(['epoch', 'lr', 'train_loss', 'train_prec1', 'train_prec5',
-                                'val_prec1', 'val_prec5', 'best_prec1'])
+        if write_header_tk:
+            csv_writer_tk.writerow(['epoch', 'lr', 'train_loss', 'train_acc1', 'train_acc5',
+                                    'val_acc1', 'val_acc5', 'best_acc1'])
         print(f'Tucker CSV log: {csv_path_tk}')
 
     # ==================== Training Loop ====================
@@ -672,90 +688,92 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
         # ---- Train ----
         if args.distill is not None:
-            avg_train_time, train_loss, train_p1, train_p5 = train_kd(
-                train_loader, module_list, criterion_list, optimizer, epoch)
-
             if args.dual_cmtf:
-                _, train_loss_2, train_p1_2, train_p5_2 = train_kd(
-                    train_loader, module_list_2, criterion_list_2, optimizer_2, epoch)
+                avg_train_time, train_loss, train_p1, train_p5, train_loss_2, train_p1_2, train_p5_2 = train_kd(
+                    train_loader, module_list, criterion_list, optimizer, epoch,
+                    module_list_2=module_list_2, criterion_list_2=criterion_list_2, optimizer_2=optimizer_2)
+            else:
+                avg_train_time, train_loss, train_p1, train_p5 = train_kd(
+                    train_loader, module_list, criterion_list, optimizer, epoch)
         else:
             avg_train_time, train_loss, train_p1, train_p5 = train(
                 train_loader, model_s, criterion_cls, optimizer, epoch)
-
+            
         total_time.update(avg_train_time)
         if args.test:
             break
 
         # ---- Validate ----
-        prec1, prec5 = validate(val_loader, model_s, criterion_cls)
         if args.dual_cmtf:
-            prec1_2, prec5_2 = validate(val_loader, model_s2, criterion_cls)
-
+            acc1, acc5, acc1_2, acc5_2 = validate(val_loader, model_s, criterion_cls, model_s2=model_s2)
+        else:
+            acc1, acc5 = validate(val_loader, model_s, criterion_cls)
+        
         # ---- Save best / checkpoint ----
         if args.local_rank == 0:
             current_lr = optimizer.param_groups[0]['lr']
 
             # CP / primary student
-            is_best = prec1 > best_prec1
-            best_prec1 = max(prec1, best_prec1)
+            is_best = acc1 > best_acc1
+            best_acc1 = max(acc1, best_acc1)
 
             save_checkpoint({
                 'epoch': epoch + 1,
                 'model_s': args.model_s,
                 'state_dict': model_s.state_dict(),
-                'best_prec1': best_prec1,
+                'best_acc1': best_acc1,
                 'optimizer': optimizer.state_dict(),
-            }, is_best, prec1, args.save_folder, tag='cp')
+            }, is_best, acc1, args.save_folder, tag='cp')
 
-            print('CP  => Prec@1 {:.3f}  Prec@5 {:.3f}  Best {:.3f}'.format(
-                prec1, prec5, best_prec1))
+            print('CP  => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
+                acc1, acc5, best_acc1))
 
             # ---- CSV row ----
             csv_writer_cp.writerow([
                 epoch, f'{current_lr:.6f}',
                 f'{train_loss:.4f}', f'{train_p1:.3f}', f'{train_p5:.3f}',
-                f'{prec1:.3f}', f'{prec5:.3f}', f'{best_prec1:.3f}'])
+                f'{acc1:.3f}', f'{acc5:.3f}', f'{best_acc1:.3f}'])
             csv_file_cp.flush()
 
             # Tucker / secondary student
             if args.dual_cmtf:
-                is_best_2 = prec1_2 > best_prec1_2
-                best_prec1_2 = max(prec1_2, best_prec1_2)
+                is_best_2 = acc1_2 > best_acc1_2
+                best_acc1_2 = max(acc1_2, best_acc1_2)
 
                 save_checkpoint({
                     'epoch': epoch + 1,
                     'model_s': args.model_s,
                     'state_dict': model_s2.state_dict(),
-                    'best_prec1': best_prec1_2,
+                    'best_acc1': best_acc1_2,
                     'optimizer': optimizer_2.state_dict(),
-                }, is_best_2, prec1_2, args.save_folder, tag='tucker')
+                }, is_best_2, acc1_2, args.save_folder, tag='tucker')
 
-                print('Tucker => Prec@1 {:.3f}  Prec@5 {:.3f}  Best {:.3f}'.format(
-                    prec1_2, prec5_2, best_prec1_2))
+                print('Tucker => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
+                    acc1_2, acc5_2, best_acc1_2))
 
                 csv_writer_tk.writerow([
                     epoch, f'{current_lr:.6f}',
                     f'{train_loss_2:.4f}', f'{train_p1_2:.3f}', f'{train_p5_2:.3f}',
-                    f'{prec1_2:.3f}', f'{prec5_2:.3f}', f'{best_prec1_2:.3f}'])
+                    f'{acc1_2:.3f}', f'{acc5_2:.3f}', f'{best_acc1_2:.3f}'])
                 csv_file_tk.flush()
 
             # ---- Periodic save ----
             if (epoch + 1) % args.save_freq == 0:
                 periodic_path = os.path.join(
                     args.save_folder,
-                    f'ckpt_epoch_{epoch+1}_cp_{prec1:.2f}.pth')
+                    f'ckpt_epoch_{epoch+1}_cp_{acc1:.2f}.pth')
                 torch.save({'epoch': epoch + 1, 'model': model_s.state_dict(),
-                            'accuracy': prec1}, periodic_path)
+                            'accuracy': acc1}, periodic_path)
                 if args.dual_cmtf:
                     periodic_path_2 = os.path.join(
                         args.save_folder,
-                        f'ckpt_epoch_{epoch+1}_tucker_{prec1_2:.2f}.pth')
+                        f'ckpt_epoch_{epoch+1}_tucker_{acc1_2:.2f}.pth')
                     torch.save({'epoch': epoch + 1, 'model': model_s2.state_dict(),
-                                'accuracy': prec1_2}, periodic_path_2)
+                                'accuracy': acc1_2}, periodic_path_2)
 
             if epoch == args.epochs - 1:
                 print('##Top-1 {0}\n##Top-5 {1}\n##Perf  {2}'.format(
-                    prec1, prec5,
+                    acc1, acc5,
                     args.total_batch_size / total_time.avg))
 
         # ---- Reset DALI loaders ----
@@ -792,21 +810,21 @@ def main():
         'gamma': args.gamma,
         'alpha': args.alpha,
         'beta': args.beta,
-        'best_prec1_cp': round(best_prec1, 4),
+        'best_acc1_cp': round(best_acc1, 4),
     }
     if args.distill == 'pursuhint_cmtf':
         summary['cp_rank_ratio'] = args.cp_rank_ratio
     if args.dual_cmtf:
         summary['tucker_rank_ratio'] = args.tucker_rank_ratio
-        summary['best_prec1_tucker'] = round(best_prec1_2, 4)
+        summary['best_acc1_tucker'] = round(best_acc1_2, 4)
     summary_path = os.path.join(args.save_folder, 'experiment_summary.json')
     with open(summary_path, 'w') as f:
         json.dump(summary, f, indent=4)
     print(f'Experiment summary saved to: {summary_path}')
 
-    print('best CP accuracy:', best_prec1)
+    print('best CP accuracy:', best_acc1)
     if args.dual_cmtf:
-        print('best Tucker accuracy:', best_prec1_2)
+        print('best Tucker accuracy:', best_acc1_2)
 
 
 # ==================================================================================
@@ -848,17 +866,17 @@ def train(train_loader, model, criterion, optimizer, epoch):
         optimizer.step()
 
         if i % args.print_freq == 0:
-            prec1, prec5 = accuracy(logit_s.data, target, topk=(1, 5))
+            acc1, acc5 = accuracy(logit_s.data, target, topk=(1, 5))
             if args.distributed:
                 reduced_loss = reduce_tensor(loss.data)
-                prec1 = reduce_tensor(prec1)
-                prec5 = reduce_tensor(prec5)
+                acc1 = reduce_tensor(acc1)
+                acc5 = reduce_tensor(acc5)
             else:
                 reduced_loss = loss.data
 
             losses.update(to_python_float(reduced_loss), inp.size(0))
-            top1.update(to_python_float(prec1), inp.size(0))
-            top5.update(to_python_float(prec5), inp.size(0))
+            top1.update(to_python_float(acc1), inp.size(0))
+            top5.update(to_python_float(acc5), inp.size(0))
 
             torch.cuda.synchronize()
             batch_time.update((time.time() - end) / args.print_freq)
@@ -869,8 +887,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Speed {3:.3f} ({4:.3f})\t'
                       'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                      'Acc@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                      'Acc@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                        epoch, i, train_loader_len,
                        args.world_size * args.batch_size / batch_time.val,
                        args.world_size * args.batch_size / batch_time.avg,
@@ -885,146 +903,141 @@ def train(train_loader, model, criterion, optimizer, epoch):
     return batch_time.avg, losses.avg, top1.avg, top5.avg
 
 
-def train_kd(train_loader, module_list, criterion_list, optimizer, epoch):
-    """One epoch of knowledge distillation training.
+def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
+             module_list_2=None, criterion_list_2=None, optimizer_2=None):
+    """One epoch of knowledge distillation training (Unified Dual-Student)."""
+    dual = module_list_2 is not None
 
-    Supports: kd, hint, attention, vid, WSL_att, pursuhint_cmtf.
-    """
-    # Set modules to train, teacher to eval
-    for module in module_list:
-        module.train()
+    for module in module_list: module.train()
     module_list[-1].eval()  # teacher is always last
+    model_s, model_t = module_list[0], module_list[-1]
+    criterion_cls, criterion_div, criterion_kd = criterion_list[0], criterion_list[1], criterion_list[2]
 
-    model_s = module_list[0]
-    model_t = module_list[-1]
+    if dual:
+        for module in module_list_2: module.train()
+        module_list_2[-1].eval()
+        model_s2 = module_list_2[0]
+        criterion_cls_2, criterion_div_2, criterion_kd_2 = criterion_list_2[0], criterion_list_2[1], criterion_list_2[2]
+        losses_2, top1_2, top5_2 = AverageMeter(), AverageMeter(), AverageMeter()
 
-    criterion_cls = criterion_list[0]
-    criterion_div = criterion_list[1]
-    criterion_kd = criterion_list[2]
-
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
-
+    batch_time, losses, top1, top5 = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
     end = time.time()
     train_loader_len = get_loader_len(train_loader, args.batch_size, args.use_dali)
 
     for i, data in enumerate(train_loader):
         inp, target = extract_batch(data, args.use_dali)
 
-        if args.prof >= 0 and i == args.prof:
-            torch.cuda.cudart().cudaProfilerStart()
-        if args.prof >= 0:
-            torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
+        if args.prof >= 0 and i == args.prof: torch.cuda.cudart().cudaProfilerStart()
+        if args.prof >= 0: torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
 
         adjust_learning_rate(optimizer, epoch, i, train_loader_len)
-        if args.test and i > 10:
-            break
+        if dual: adjust_learning_rate(optimizer_2, epoch, i, train_loader_len)
+        if args.test and i > 10: break
 
-        # ---- Forward: Student ----
-        feat_s, logit_s = model_s(inp, is_feat=True, preact=args.preact,
-                                  hint_points=args.s_points)
-
-        # ---- Forward: Teacher (no grad) ----
+        # ---- Forward: Teacher ----
         with torch.no_grad():
-            feat_t, logit_t = model_t(inp, is_feat=True, preact=args.preact,
-                                      hint_points=args.hint_points)
+            feat_t, logit_t = model_t(inp, is_feat=True, preact=args.preact, hint_points=args.hint_points)
             feat_t = [f.detach() for f in feat_t]
 
-        # ---- Classification loss ----
+        # ---- Process CP Student ----
+        feat_s, logit_s = model_s(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
         loss_cls = criterion_cls(logit_s, target)
+        loss_div = criterion_div(logit_s, logit_t, target) if args.distill == 'WSL_att' else criterion_div(logit_s, logit_t)
 
-        # ---- KL divergence loss ----
-        if args.distill == 'WSL_att':
-            loss_div = criterion_div(logit_s, logit_t, target)
-        else:
-            loss_div = criterion_div(logit_s, logit_t)
-
-        # ---- Method-specific feature distillation loss ----
-        if args.distill == 'kd':
-            loss_kd = torch.tensor(0.0).cuda()
-
+        if args.distill == 'kd': loss_kd = torch.tensor(0.0).cuda()
         elif args.distill == 'hint':
-            # Apply ConvReg modules (module_list[1..N-1]) to student features
             f_s = [module_list[1 + j](feat_s[j]) for j in range(len(feat_s))]
             loss_kd = criterion_kd(f_s, feat_t)
+        elif args.distill in ['attention', 'WSL_att']: loss_kd = sum(criterion_kd(feat_s, feat_t))
+        elif args.distill == 'vid': loss_kd = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s, feat_t, criterion_kd)])
+        elif args.distill == 'pursuhint_cmtf': loss_kd = criterion_kd(feat_s, feat_t)
+        else: raise NotImplementedError(args.distill)
 
-        elif args.distill in ['attention', 'WSL_att']:
-            loss_group = criterion_kd(feat_s, feat_t)
-            loss_kd = sum(loss_group)
-
-        elif args.distill == 'vid':
-            loss_group = [c(f_s, f_t) for f_s, f_t, c in
-                          zip(feat_s, feat_t, criterion_kd)]
-            loss_kd = sum(loss_group)
-
-        elif args.distill == 'pursuhint_cmtf':
-            loss_kd = criterion_kd(feat_s, feat_t)
-
-        else:
-            raise NotImplementedError(args.distill)
-
-        # ---- Combined loss ----
         loss = args.gamma * loss_cls + args.alpha * loss_div + args.beta * loss_kd
 
-        # ---- Backward ----
         optimizer.zero_grad()
         if args.opt_level is not None:
-            with amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
+            with amp.scale_loss(loss, optimizer) as scaled_loss: scaled_loss.backward()
         else:
             loss.backward()
         optimizer.step()
 
-        # ---- Logging ----
+        # ---- Process Tucker Student ----
+        if dual:
+            feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
+            loss_cls_2 = criterion_cls_2(logit_s2, target)
+            loss_div_2 = criterion_div_2(logit_s2, logit_t, target) if args.distill == 'WSL_att' else criterion_div_2(logit_s2, logit_t)
+            
+            # Tucker is currently only designed to be used with pursuhint_cmtf
+            loss_kd_2 = criterion_kd_2(feat_s2, feat_t) 
+            loss_2 = args.gamma * loss_cls_2 + args.alpha * loss_div_2 + args.beta * loss_kd_2
+
+            optimizer_2.zero_grad()
+            if args.opt_level is not None:
+                with amp.scale_loss(loss_2, optimizer_2) as scaled_loss_2: scaled_loss_2.backward()
+            else:
+                loss_2.backward()
+            optimizer_2.step()
+
+        # ---- Logging & Metrics ----
         if i % args.print_freq == 0:
-            prec1, prec5 = accuracy(logit_s.data, target, topk=(1, 5))
+            acc1, acc5 = accuracy(logit_s.data, target, topk=(1, 5))
+            if dual: acc1_2, acc5_2 = accuracy(logit_s2.data, target, topk=(1, 5))
 
             if args.distributed:
                 reduced_loss = reduce_tensor(loss.data)
-                prec1 = reduce_tensor(prec1)
-                prec5 = reduce_tensor(prec5)
+                acc1, acc5 = reduce_tensor(acc1), reduce_tensor(acc5)
+                if dual:
+                    reduced_loss_2 = reduce_tensor(loss_2.data)
+                    acc1_2, acc5_2 = reduce_tensor(acc1_2), reduce_tensor(acc5_2)
             else:
                 reduced_loss = loss.data
+                if dual: reduced_loss_2 = loss_2.data
 
             losses.update(to_python_float(reduced_loss), inp.size(0))
-            top1.update(to_python_float(prec1), inp.size(0))
-            top5.update(to_python_float(prec5), inp.size(0))
+            top1.update(to_python_float(acc1), inp.size(0))
+            top5.update(to_python_float(acc5), inp.size(0))
+
+            if dual:
+                losses_2.update(to_python_float(reduced_loss_2), inp.size(0))
+                top1_2.update(to_python_float(acc1_2), inp.size(0))
+                top5_2.update(to_python_float(acc5_2), inp.size(0))
 
             torch.cuda.synchronize()
             batch_time.update((time.time() - end) / args.print_freq)
             end = time.time()
 
             if args.local_rank == 0:
-                print('Epoch: [{0}][{1}/{2}]\t'
+                print('Epoch [{0}][{1}/{2}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Speed {3:.3f} ({4:.3f})\t'
-                      'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                       epoch, i, train_loader_len,
-                       args.world_size * args.batch_size / batch_time.val,
-                       args.world_size * args.batch_size / batch_time.avg,
-                       batch_time=batch_time, loss=losses, top1=top1, top5=top5))
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+                       epoch, i, train_loader_len, batch_time=batch_time, loss=losses, top1=top1))
+                if dual:
+                    print('  [Tucker] \t\tLoss {loss.val:.4f} ({loss.avg:.4f})\t'
+                          'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(loss=losses_2, top1=top1_2))
 
-        if args.prof >= 0:
-            torch.cuda.nvtx.range_pop()
+        if args.prof >= 0: torch.cuda.nvtx.range_pop()
         if args.prof >= 0 and i == args.prof + 10:
             torch.cuda.cudart().cudaProfilerStop()
             quit()
 
+    if dual:
+        return batch_time.avg, losses.avg, top1.avg, top5.avg, losses_2.avg, top1_2.avg, top5_2.avg
     return batch_time.avg, losses.avg, top1.avg, top5.avg
 
 
-def validate(val_loader, model, criterion):
-    """Evaluate on validation set."""
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
+def validate(val_loader, model, criterion, model_s2=None):
+    """Evaluate on validation set (Unified Dual-Student)."""
+    dual = model_s2 is not None
+
+    batch_time, losses, top1, top5 = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+    if dual:
+        losses_2, top1_2, top5_2 = AverageMeter(), AverageMeter(), AverageMeter()
 
     model.eval()
+    if dual: model_s2.eval()
+    
     end = time.time()
     val_loader_len = get_loader_len(val_loader, args.batch_size, args.use_dali)
 
@@ -1034,19 +1047,31 @@ def validate(val_loader, model, criterion):
         with torch.no_grad():
             _, logit_s = model(inp, is_feat=True, preact=args.preact)
             loss = criterion(logit_s, target)
+            if dual:
+                _, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact)
+                loss_2 = criterion(logit_s2, target)
 
-        prec1, prec5 = accuracy(logit_s.data, target, topk=(1, 5))
+        acc1, acc5 = accuracy(logit_s.data, target, topk=(1, 5))
+        if dual: acc1_2, acc5_2 = accuracy(logit_s2.data, target, topk=(1, 5))
 
         if args.distributed:
             reduced_loss = reduce_tensor(loss.data)
-            prec1 = reduce_tensor(prec1)
-            prec5 = reduce_tensor(prec5)
+            acc1, acc5 = reduce_tensor(acc1), reduce_tensor(acc5)
+            if dual:
+                reduced_loss_2 = reduce_tensor(loss_2.data)
+                acc1_2, acc5_2 = reduce_tensor(acc1_2), reduce_tensor(acc5_2)
         else:
             reduced_loss = loss.data
+            if dual: reduced_loss_2 = loss_2.data
 
         losses.update(to_python_float(reduced_loss), inp.size(0))
-        top1.update(to_python_float(prec1), inp.size(0))
-        top5.update(to_python_float(prec5), inp.size(0))
+        top1.update(to_python_float(acc1), inp.size(0))
+        top5.update(to_python_float(acc5), inp.size(0))
+
+        if dual:
+            losses_2.update(to_python_float(reduced_loss_2), inp.size(0))
+            top1_2.update(to_python_float(acc1_2), inp.size(0))
+            top5_2.update(to_python_float(acc5_2), inp.size(0))
 
         batch_time.update(time.time() - end)
         end = time.time()
@@ -1054,18 +1079,17 @@ def validate(val_loader, model, criterion):
         if args.local_rank == 0 and i % args.print_freq == 0:
             print('Test: [{0}/{1}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Speed {2:.3f} ({3:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                   i, val_loader_len,
-                   args.world_size * args.batch_size / batch_time.val,
-                   args.world_size * args.batch_size / batch_time.avg,
-                   batch_time=batch_time, loss=losses,
-                   top1=top1, top5=top5))
+                  'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+                   i, val_loader_len, batch_time=batch_time, loss=losses, top1=top1))
+            if dual:
+                print('  [Tucker] \tLoss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(loss=losses_2, top1=top1_2))
 
-    print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(
-        top1=top1, top5=top5))
+    print(' * [CP] Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+    if dual:
+        print(' * [Tucker] Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1_2, top5=top5_2))
+        return top1.avg, top5.avg, top1_2.avg, top5_2.avg
 
     return top1.avg, top5.avg
 
@@ -1122,7 +1146,7 @@ def adjust_learning_rate(optimizer, epoch, step, len_epoch):
 
 
 def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
+    """Computes the accuracy@k for the specified values of k"""
     maxk = max(topk)
     batch_size = target.size(0)
 

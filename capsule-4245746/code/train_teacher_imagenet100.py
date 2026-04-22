@@ -364,14 +364,6 @@ def main():
             tb_logger.log_value('val_acc_top5', val_acc5, epoch)
             tb_logger.log_value('val_loss', val_loss, epoch)
 
-        # ---- CSV row ----
-        csv_writer.writerow([
-            epoch, f'{lr:.6f}',
-            f'{train_acc:.4f}', f'{train_loss:.4f}',
-            f'{val_acc:.4f}', f'{val_acc5:.4f}',
-            f'{val_loss:.4f}', f'{best_acc:.4f}'])
-        csv_file.flush()
-
         # ---- Save best ----
         if val_acc > best_acc:
             best_acc = val_acc
@@ -385,6 +377,14 @@ def main():
                                      f'{opt.model}_best_{best_acc:.2f}.pth')
             torch.save(state, best_path)
             print(f'New best! Acc@1={best_acc:.3f}  saved -> {best_path}')
+
+        # ---- CSV row ----
+        csv_writer.writerow([
+            epoch, f'{lr:.6f}',
+            f'{train_acc:.4f}', f'{train_loss:.4f}',
+            f'{val_acc:.4f}', f'{val_acc5:.4f}',
+            f'{val_loss:.4f}', f'{best_acc:.4f}'])
+        csv_file.flush()
 
         # ---- Periodic checkpoint ----
         if epoch % opt.save_freq == 0:
