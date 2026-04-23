@@ -59,7 +59,6 @@ def parse_option():
 
     # Logging / checkpointing
     parser.add_argument('--print_freq', type=int, default=100, help='print frequency (batches)')
-    parser.add_argument('--save_freq', type=int, default=20, help='checkpoint save frequency (epochs)')
 
     # Training
     parser.add_argument('--batch_size', type=int, default=256, help='batch size')
@@ -87,6 +86,9 @@ def parse_option():
 
     # Experiment
     parser.add_argument('--trial', type=int, default=0, help='experiment id')
+
+    # PyTorch Compile Optimization 
+    parser.add_argument('--torch_compile', action='store_true')
 
     opt = parser.parse_args()
 
@@ -314,6 +316,9 @@ def main():
         model = model.cuda()
         cudnn.benchmark = True
 
+        if opt.torch_compile:
+            model = torch.compile(model)
+
     # ---- Optimizer ----
     optimizer = optim.SGD(model.parameters(),
                           lr=opt.learning_rate,
@@ -373,8 +378,7 @@ def main():
                 'best_acc': best_acc,
                 'optimizer': optimizer.state_dict(),
             }
-            best_path = os.path.join(opt.save_folder,
-                                     f'{opt.model}_best_{best_acc:.2f}.pth')
+            best_path = os.path.join(opt.save_folder, f'{opt.model}_best.pth')
             torch.save(state, best_path)
             print(f'New best! Acc@1={best_acc:.3f}  saved -> {best_path}')
 
@@ -385,18 +389,6 @@ def main():
             f'{val_acc:.4f}', f'{val_acc5:.4f}',
             f'{val_loss:.4f}', f'{best_acc:.4f}'])
         csv_file.flush()
-
-        # ---- Periodic checkpoint ----
-        if epoch % opt.save_freq == 0:
-            state = {
-                'epoch': epoch,
-                'model': model.state_dict(),
-                'accuracy': val_acc,
-                'optimizer': optimizer.state_dict(),
-            }
-            ckpt_path = os.path.join(opt.save_folder, f'ckpt_epoch_{epoch}.pth')
-            torch.save(state, ckpt_path)
-            print(f'  Checkpoint saved -> {ckpt_path}')
 
     # ---- Close CSV ----
     csv_file.close()

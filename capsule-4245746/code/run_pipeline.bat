@@ -17,14 +17,14 @@ set LOG=.\save\logs\%MODEL_T%_%DATASET%_log.txt
 set NUM_LAYERS=18
 set NUM_CLUSTERS=3
 set METRIC=r2
-set EPOCHS=1
-set LEARNING_RATE=0.1
+set EPOCHS=3
+set LEARNING_RATE=0.01
 set LR_DECAY_EPOCHS=60,120,160
 set BATCH=64
 set NUM_WORKERS=4
 
 set HINTS_DIR=.\save\hints\%MODEL_T%_%DATASET%_last
-set TEACHER_PATH=.\save\models\%MODEL_T%_%DATASET%_lr_%LEARNING_RATE%_decay_0.0005_trial_0\%MODEL_T%_last.pth
+set TEACHER_PATH=.\save\models\%MODEL_T%_%DATASET%_lr_%LEARNING_RATE%_decay_0.0005_trial_0\%MODEL_T%_best.pth
 
 REM ============================================================
 REM Student training loss weights
@@ -140,8 +140,8 @@ set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODE
     --model_t %MODEL_T% ^
     --path_t "%TEACHER_PATH%" ^
     --model_s %MODEL_S% ^
-    --path_s_cp "!STUDENT_DIR!\%MODEL_S%_last_cp.pth" ^
-    --path_s_tucker "!STUDENT_DIR!\%MODEL_S%_last_tucker.pth" >> %LOG% 2>&1
+    --path_s_cp "!STUDENT_DIR!\%MODEL_S%_best_cp.pth" ^
+    --path_s_tucker "!STUDENT_DIR!\%MODEL_S%_best_tucker.pth" >> %LOG% 2>&1
 
 echo.
 echo ============================================================

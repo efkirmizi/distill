@@ -69,6 +69,7 @@ if [ "$RUN_TEACHER" -eq 1 ]; then
 
     ${PYTHON} train_teacher_imagenet100.py \
         --model ${MODEL_T} \
+        --torch_compile \
         --data_folder "${IMAGENET_DIR}" \
         --epochs ${TEACHER_EPOCHS} \
         --batch_size ${BATCH} \
@@ -162,6 +163,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
     ${PYTHON} -m torch.distributed.launch --master_port 9200 --nproc_per_node=${NUM_GPUS} train_stu_imagenet100.py \
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
+        --torch_compile \
         --path_t "${TEACHER_PATH}" \
         --distill pursuhint_cmtf \
         --dual_cmtf \

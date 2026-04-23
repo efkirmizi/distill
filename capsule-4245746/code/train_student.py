@@ -50,7 +50,6 @@ def parse_option():
     parser = argparse.ArgumentParser('argument for training')
 
     parser.add_argument('--print_freq', type=int, default=100, help='print frequency')
-    parser.add_argument('--save_freq', type=int, default=40, help='save frequency')
     parser.add_argument('--batch_size', type=int, default=64, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=240, help='number of training epochs')
@@ -115,6 +114,8 @@ def parse_option():
     parser.add_argument('--nce_t', default=0.07, type=float, help='temperature parameter for softmax')
     parser.add_argument('--nce_m', default=0.5, type=float, help='momentum for non-parametric updates')
 
+    # PyTorch model compile optimization
+    parser.add_argument('--torch_compile', action='store_true')
 
     opt = parser.parse_args()
 
@@ -224,8 +225,9 @@ def main():
 
     # model
     model_t = load_teacher(opt.path_t, n_cls, opt.model_t)
+    model_t.eval()
+
     model_s = model_dict[opt.model_s](num_classes=n_cls)
-    
     if opt.dual_cmtf:
         import copy
         model_s2 = copy.deepcopy(model_s)
@@ -241,6 +243,13 @@ def main():
     model_t = nn.DataParallel(model_t).cuda()
     if opt.dual_cmtf:
         model_s2 = nn.DataParallel(model_s2).cuda()
+
+    # ---- Compile models ----
+    if opt.torch_compile:
+        model_s = torch.compile(model_s)
+        model_t = torch.compile(model_t)
+        if opt.dual_cmtf:
+            model_s2 = torch.compile(model_s2)
     
     if opt.path_s:
         try:
@@ -265,7 +274,7 @@ def main():
     #s_points are the last layers of blocks, unless it is specified:
     #NOTE: s_points should be specified by args for ATT+CRD experiments.
     if opt.s_points:
-    	s_points = opt.s_points
+        s_points = opt.s_points
     else:
 
         if opt.model_s == 'resnet8' or opt.model_s == 'resnet8x4':
@@ -557,7 +566,7 @@ def main():
                 'model': model_s.state_dict(),
                 'best_acc': best_acc,
             }
-            save_file = os.path.join(opt.save_folder, '{}_best_cp_{}.pth'.format(opt.model_s, best_acc))
+            save_file = os.path.join(opt.save_folder, '{}_best_cp.pth'.format(opt.model_s))
             print('saving the best CP model!')
             torch.save(state, save_file)
 
@@ -570,28 +579,8 @@ def main():
                     'model': model_s2.state_dict(),
                     'best_acc': best_acc_2,
                 }
-                save_file2 = os.path.join(opt.save_folder, '{}_best_tucker_{}.pth'.format(opt.model_s, best_acc_2))
+                save_file2 = os.path.join(opt.save_folder, '{}_best_tucker.pth'.format(opt.model_s))
                 print('saving the best Tucker model!')
-                torch.save(state2, save_file2)
-
-        # regular saving
-        if epoch % opt.save_freq == 0:
-            print('==> Saving...')
-            state = {
-                'epoch': epoch,
-                'model': model_s.state_dict(),
-                'accuracy': test_acc,
-            }
-            save_file = os.path.join(opt.save_folder, 'ckpt_epoch_{epoch}_cp_{test_acc}.pth'.format(epoch=epoch, test_acc=test_acc))
-            torch.save(state, save_file)
-            
-            if opt.dual_cmtf:
-                state2 = {
-                    'epoch': epoch,
-                    'model': model_s2.state_dict(),
-                    'accuracy': test_acc_2,
-                }
-                save_file2 = os.path.join(opt.save_folder, 'ckpt_epoch_{epoch}_tucker_{test_acc}.pth'.format(epoch=epoch, test_acc=test_acc_2))
                 torch.save(state2, save_file2)
 
     # --- Close CSVs ---

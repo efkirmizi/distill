@@ -40,7 +40,6 @@ def parse_option():
 
     parser.add_argument('--print_freq', type=int, default=100, help='print frequency')
     parser.add_argument('--tb_freq', type=int, default=500, help='tb frequency')
-    parser.add_argument('--save_freq', type=int, default=40, help='save frequency')
     parser.add_argument('--batch_size', type=int, default=64, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=240, help='number of training epochs')
@@ -59,6 +58,9 @@ def parse_option():
     parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar100', 'cifar10'], help='dataset')
 
     parser.add_argument('-t', '--trial', type=int, default=0, help='the experiment id')
+
+    # PyTorch model compile optimization
+    parser.add_argument('--torch_compile', action='store_true')
 
     opt = parser.parse_args()
     
@@ -120,6 +122,9 @@ def main():
         model = model.cuda()
         criterion = criterion.cuda()
         cudnn.benchmark = True
+        
+        if opt.torch_compile:
+            model = torch.compile(model)
 
     # tensorboard
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
@@ -153,6 +158,19 @@ def main():
         logger.log_value('test_acc_top5', test_acc_top5, epoch)
         logger.log_value('test_loss', test_loss, epoch)
 
+        # save the best model
+        if test_acc > best_acc:
+            best_acc = test_acc
+            state = {
+                'epoch': epoch,
+                'model': model.state_dict(),
+                'best_acc': best_acc,
+                'optimizer': optimizer.state_dict(),
+            }
+            save_file = os.path.join(opt.save_folder, '{}_best.pth'.format(opt.model))
+            print('saving the best teacher model!')
+            torch.save(state, save_file)
+
         # --- CSV: write epoch row ---
         current_lr = optimizer.param_groups[0]['lr']
         _ta = train_acc.item() if hasattr(train_acc, 'item') else float(train_acc)
@@ -165,31 +183,6 @@ def main():
                              f'{_va:.4f}', f'{_v5:.4f}',
                              f'{test_loss:.4f}', f'{_best:.4f}'])
         csv_file.flush()
-        
-        # save the best model
-        if test_acc > best_acc:
-            best_acc = test_acc
-            state = {
-                'epoch': epoch,
-                'model': model.state_dict(),
-                'best_acc': best_acc,
-                'optimizer': optimizer.state_dict(),
-            }
-            save_file = os.path.join(opt.save_folder, '{}_best_{}.pth'.format(opt.model, best_acc))
-            print('saving the best model!')
-            torch.save(state, save_file)
-
-        # regular saving
-        if epoch % opt.save_freq == 0:
-            print('==> Saving...')
-            state = {
-                'epoch': epoch,
-                'model': model.state_dict(),
-                'accuracy': test_acc,
-                'optimizer': optimizer.state_dict(),
-            }
-            save_file = os.path.join(opt.save_folder, 'ckpt_epoch_{epoch}.pth'.format(epoch=epoch))
-            torch.save(state, save_file)
 
     # Close CSV
     csv_file.close()

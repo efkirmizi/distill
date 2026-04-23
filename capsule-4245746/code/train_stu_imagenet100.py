@@ -111,7 +111,6 @@ def parse():
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M')
     parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float, metavar='W')
     parser.add_argument('--print-freq', '-p', default=10, type=int, metavar='N')
-    parser.add_argument('--save_freq', type=int, default=20, help='checkpoint save frequency')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint')
     parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
@@ -171,6 +170,9 @@ def parse():
     parser.add_argument('--deterministic', action='store_true')
     parser.add_argument('-t', '--test', action='store_true',
                         help='Launch test mode with preset arguments')
+
+    # PyTorch Compile Optimization
+    parser.add_argument('--torch_compile', action='store_true')
 
     args = parser.parse_args()
 
@@ -436,11 +438,21 @@ def main():
     if args.dual_cmtf:
         model_s2 = model_s2.cuda()
 
+    # ---- Compile student models ----
+    if args.torch_compile:
+        model_s = torch.compile(model_s)
+        if args.dual_cmtf:
+            model_s2 = torch.compile(model_s2)
+
     # ---- Load teacher (only if doing distillation) ----
     teacher = None
     if args.distill is not None:
         teacher = load_teacher(args.path_t, n_cls, args.model_t).cuda()
         teacher.eval()
+
+        # Compile teacher model
+        if args.torch_compile:
+            teacher = torch.compile(teacher)
 
     # ---- Build module_list / trainable_list / criterion_list ----
     module_list = nn.ModuleList([model_s])
@@ -723,7 +735,7 @@ def main():
                 'state_dict': model_s.state_dict(),
                 'best_acc1': best_acc1,
                 'optimizer': optimizer.state_dict(),
-            }, is_best, acc1, args.save_folder, tag='cp')
+            }, is_best, args.save_folder, tag='cp')
 
             print('CP  => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
                 acc1, acc5, best_acc1))
@@ -746,7 +758,7 @@ def main():
                     'state_dict': model_s2.state_dict(),
                     'best_acc1': best_acc1_2,
                     'optimizer': optimizer_2.state_dict(),
-                }, is_best_2, acc1_2, args.save_folder, tag='tucker')
+                }, is_best_2, args.save_folder, tag='tucker')
 
                 print('Tucker => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
                     acc1_2, acc5_2, best_acc1_2))
@@ -756,20 +768,6 @@ def main():
                     f'{train_loss_2:.4f}', f'{train_p1_2:.3f}', f'{train_p5_2:.3f}',
                     f'{acc1_2:.3f}', f'{acc5_2:.3f}', f'{best_acc1_2:.3f}'])
                 csv_file_tk.flush()
-
-            # ---- Periodic save ----
-            if (epoch + 1) % args.save_freq == 0:
-                periodic_path = os.path.join(
-                    args.save_folder,
-                    f'ckpt_epoch_{epoch+1}_cp_{acc1:.2f}.pth')
-                torch.save({'epoch': epoch + 1, 'model': model_s.state_dict(),
-                            'accuracy': acc1}, periodic_path)
-                if args.dual_cmtf:
-                    periodic_path_2 = os.path.join(
-                        args.save_folder,
-                        f'ckpt_epoch_{epoch+1}_tucker_{acc1_2:.2f}.pth')
-                    torch.save({'epoch': epoch + 1, 'model': model_s2.state_dict(),
-                                'accuracy': acc1_2}, periodic_path_2)
 
             if epoch == args.epochs - 1:
                 print('##Top-1 {0}\n##Top-5 {1}\n##Perf  {2}'.format(
@@ -1098,18 +1096,13 @@ def validate(val_loader, model, criterion, model_s2=None):
 #  UTILITIES
 # ==================================================================================
 
-def save_checkpoint(state, is_best, acc, save_folder, tag='cp'):
+def save_checkpoint(state, is_best, save_folder, tag='cp'):
     """Save checkpoint to save_folder with tag (cp or tucker)."""
     filename = os.path.join(save_folder, f'checkpoint_{tag}.pth.tar')
     torch.save(state, filename)
     if is_best:
-        best_path = os.path.join(save_folder, f'model_best_{tag}.pth.tar')
+        best_path = os.path.join(save_folder, f'{state["model_s"]}_best_{tag}.pth')
         shutil.copyfile(filename, best_path)
-        # Also save with accuracy in filename for easy identification
-        acc_path = os.path.join(
-            save_folder,
-            f'{state["model_s"]}_best_{tag}_{acc:.2f}.pth')
-        torch.save(state, acc_path)
 
 
 class AverageMeter(object):
