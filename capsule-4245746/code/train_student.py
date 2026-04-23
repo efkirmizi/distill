@@ -467,8 +467,9 @@ def main():
     csv_path_cp = os.path.join(opt.save_folder, 'training_log_cp.csv')
     csv_file_cp = open(csv_path_cp, 'w', newline='')
     csv_writer_cp = csv.writer(csv_file_cp)
-    csv_writer_cp.writerow(['epoch', 'lr', 'train_acc', 'train_loss', 'train_loss_cls',
-                            'train_loss_div', 'train_loss_kd',
+    csv_writer_cp.writerow(['epoch', 'lr', 'epoch_time', 
+                            'train_acc', 'train_acc_top5', 'train_loss', 
+                            'train_loss_cls', 'train_loss_div', 'train_loss_kd',
                             'test_acc', 'test_acc_top5', 'test_loss', 'best_acc'])
     print(f'CP CSV log: {csv_path_cp}')
 
@@ -476,10 +477,11 @@ def main():
         csv_path_tk = os.path.join(opt.save_folder, 'training_log_tucker.csv')
         csv_file_tk = open(csv_path_tk, 'w', newline='')
         csv_writer_tk = csv.writer(csv_file_tk)
-        csv_writer_tk.writerow(['epoch', 'lr', 'train_acc', 'train_loss', 'train_loss_cls',
-                                'train_loss_div', 'train_loss_kd',
-                                'test_acc', 'test_acc_top5', 'test_loss', 'best_acc'])
-        print(f'Tucker CSV log: {csv_path_tk}')
+        csv_writer_tk.writerow(['epoch', 'lr', 'epoch_time', 
+                            'train_acc', 'train_acc_top5', 'train_loss', 
+                            'train_loss_cls', 'train_loss_div', 'train_loss_kd',
+                            'test_acc', 'test_acc_top5', 'test_loss', 'best_acc'])
+    print(f'Tucker CSV log: {csv_path_tk}')
 
     for epoch in range(opt.start_epoch, opt.epochs + 1):
 
@@ -491,13 +493,17 @@ def main():
         print('hint positions: ', opt.hint_points)
 
         time1 = time.time()
-        train_acc, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=scaler, teacher_dict=teacher_dict)
+        train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=scaler, teacher_dict=teacher_dict)
+        time2 = time.time()
+        epoch_time_cp = time2 - time1
         
         if opt.dual_cmtf:
-            train_acc_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2 = train(epoch, train_loader, module_list_2, criterion_list_2, optimizer_2, opt, scaler=scaler, teacher_dict=teacher_dict)
-        
-        time2 = time.time()
-        print('epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
+            time1 = time.time()
+            train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2 = train(epoch, train_loader, module_list_2, criterion_list_2, optimizer_2, opt, scaler=scaler, teacher_dict=teacher_dict)
+            time2 = time.time()
+            epoch_time_tucker = time2 - time1
+
+        print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time_cp + epoch_time_tucker))
 
         print('train_acc CP:', train_acc)
         print('train_loss CP:', train_loss)
@@ -510,6 +516,7 @@ def main():
             test_acc_2, test_acc_top5_2, test_loss_2 = validate(val_loader, model_s2, criterion_cls, opt)
 
         logger.log_value('train_acc_cp', train_acc, epoch)
+        logger.log_value('train_acc_top5_cp', train_acc_top5, epoch)
         logger.log_value('train_loss_cp', train_loss, epoch)
         logger.log_value('train_loss_cls_cp', train_loss_cls, epoch)
         logger.log_value('train_loss_div_cp', train_loss_div, epoch)
@@ -520,6 +527,7 @@ def main():
         
         if opt.dual_cmtf:
             logger.log_value('train_acc_tucker', train_acc_2, epoch)
+            logger.log_value('train_acc_top5_tucker', train_acc_top5_2, epoch)
             logger.log_value('train_loss_tucker', train_loss_2, epoch)
             logger.log_value('train_loss_cls_tucker', train_loss_cls_2, epoch)
             logger.log_value('train_loss_div_tucker', train_loss_div_2, epoch)
@@ -541,19 +549,19 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         def _f(v):
             return v.item() if hasattr(v, 'item') else float(v)
-        csv_writer_cp.writerow([epoch, f'{current_lr:.6f}',
-                                f'{_f(train_acc):.4f}', f'{_f(train_loss):.4f}',
-                                f'{_f(train_loss_cls):.4f}', f'{_f(train_loss_div):.4f}',
-                                f'{_f(train_loss_kd):.4f}',
+        csv_writer_cp.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time_cp:.2f}',
+                                f'{_f(train_acc):.4f}', f'{_f(train_acc_top5):.4f}',
+                                f'{_f(train_loss):.4f}', f'{_f(train_loss_cls):.4f}', 
+                                f'{_f(train_loss_div):.4f}', f'{_f(train_loss_kd):.4f}',
                                 f'{_f(test_acc):.4f}', f'{_f(test_acc_top5):.4f}',
                                 f'{_f(test_loss):.4f}', f'{_f(best_acc):.4f}'])
         csv_file_cp.flush()
 
         if opt.dual_cmtf:
-            csv_writer_tk.writerow([epoch, f'{current_lr:.6f}',
-                                   f'{_f(train_acc_2):.4f}', f'{_f(train_loss_2):.4f}',
-                                   f'{_f(train_loss_cls_2):.4f}', f'{_f(train_loss_div_2):.4f}',
-                                   f'{_f(train_loss_kd_2):.4f}',
+            csv_writer_tk.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time_tucker:.2f}',
+                                   f'{_f(train_acc_2):.4f}', f'{_f(train_acc_top5_2):.4f}', 
+                                   f'{_f(train_loss_2):.4f}', f'{_f(train_loss_cls_2):.4f}', 
+                                   f'{_f(train_loss_div_2):.4f}', f'{_f(train_loss_kd_2):.4f}',
                                    f'{_f(test_acc_2):.4f}', f'{_f(test_acc_top5_2):.4f}',
                                    f'{_f(test_loss_2):.4f}', f'{_f(best_acc_2):.4f}'])
             csv_file_tk.flush()

@@ -134,7 +134,7 @@ def main():
     csv_path = os.path.join(opt.save_folder, 'training_log.csv')
     csv_file = open(csv_path, 'w', newline='')
     csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(['epoch', 'lr', 'train_acc', 'train_loss',
+    csv_writer.writerow(['epoch', 'lr', 'epoch_time','train_acc', 'train_acc_top5', 'train_loss',
                          'test_acc', 'test_acc_top5', 'test_loss', 'best_acc'])
     print(f'CSV log will be saved to: {csv_path}')
 
@@ -145,11 +145,13 @@ def main():
         print("==> training...")
 
         time1 = time.time()
-        train_acc, train_loss = train(epoch, train_loader, model, criterion, optimizer, opt, scaler=scaler)
+        train_acc, train_acc_top5, train_loss = train(epoch, train_loader, model, criterion, optimizer, opt, scaler=scaler)
         time2 = time.time()
-        print('epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
+        epoch_time = time2 - time1
+        print('epoch {}, total time {:.2f}'.format(epoch, epoch_time))
 
         logger.log_value('train_acc', train_acc, epoch)
+        logger.log_value('train_acc_top5', train_acc_top5, epoch)
         logger.log_value('train_loss', train_loss, epoch)
 
         test_acc, test_acc_top5, test_loss = validate(val_loader, model, criterion, opt)
@@ -174,12 +176,13 @@ def main():
         # --- CSV: write epoch row ---
         current_lr = optimizer.param_groups[0]['lr']
         _ta = train_acc.item() if hasattr(train_acc, 'item') else float(train_acc)
+        _t5 = train_acc_top5.item() if hasattr(train_acc_top5, 'item') else float(train_acc_top5)
         _va = test_acc.item() if hasattr(test_acc, 'item') else float(test_acc)
         _v5 = test_acc_top5.item() if hasattr(test_acc_top5, 'item') else float(test_acc_top5)
         _best = best_acc.item() if hasattr(best_acc, 'item') else float(best_acc)
         
-        csv_writer.writerow([epoch, f'{current_lr:.6f}',
-                             f'{_ta:.4f}', f'{train_loss:.4f}',
+        csv_writer.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
+                             f'{_ta:.4f}', f'{_t5:.4f}', f'{train_loss:.4f}',
                              f'{_va:.4f}', f'{_v5:.4f}',
                              f'{test_loss:.4f}', f'{_best:.4f}'])
         csv_file.flush()

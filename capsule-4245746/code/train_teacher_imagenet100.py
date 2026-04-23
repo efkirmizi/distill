@@ -247,7 +247,7 @@ def train_one_epoch(epoch, train_loader, model, criterion, optimizer, opt, scale
             sys.stdout.flush()
 
     print(f' * Train Acc@1 {top1.avg:.3f}  Acc@5 {top5.avg:.3f}')
-    return top1.avg, losses.avg
+    return top1.avg, top5.avg, losses.avg
 
 
 @torch.no_grad()
@@ -343,7 +343,7 @@ def main():
     csv_path = os.path.join(opt.save_folder, 'training_log.csv')
     csv_file = open(csv_path, 'w', newline='')
     csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(['epoch', 'lr', 'train_acc', 'train_loss',
+    csv_writer.writerow(['epoch', 'lr', 'epoch_time', 'train_acc', 'train_acc_top5', 'train_loss',
                          'val_acc', 'val_acc_top5', 'val_loss', 'best_acc'])
     print(f'CSV log: {csv_path}')
 
@@ -354,16 +354,18 @@ def main():
         print(f'\n==> Epoch {epoch}/{opt.epochs}  lr={lr:.6f}')
 
         t0 = time.time()
-        train_acc, train_loss = train_one_epoch(
+        train_acc, train_acc5, train_loss = train_one_epoch(
             epoch, train_loader, model, criterion, optimizer, opt, scaler)
         t1 = time.time()
-        print(f'Epoch time: {t1 - t0:.1f}s')
+        epoch_time = t1 - t0
+        print(f'Epoch time: {epoch_time:.1f}s')
 
         val_acc, val_acc5, val_loss = validate(val_loader, model, criterion, opt)
 
         # ---- Tensorboard ----
         if tb_logger is not None:
             tb_logger.log_value('train_acc', train_acc, epoch)
+            tb_logger.log_value('train_acc_top5', train_acc5, epoch)
             tb_logger.log_value('train_loss', train_loss, epoch)
             tb_logger.log_value('val_acc', val_acc, epoch)
             tb_logger.log_value('val_acc_top5', val_acc5, epoch)
@@ -384,8 +386,8 @@ def main():
 
         # ---- CSV row ----
         csv_writer.writerow([
-            epoch, f'{lr:.6f}',
-            f'{train_acc:.4f}', f'{train_loss:.4f}',
+            epoch, f'{lr:.6f}', f'{epoch_time:.1f}',
+            f'{train_acc:.4f}', f'{train_acc5:.4f}', f'{train_loss:.4f}',
             f'{val_acc:.4f}', f'{val_acc5:.4f}',
             f'{val_loss:.4f}', f'{best_acc:.4f}'])
         csv_file.flush()
