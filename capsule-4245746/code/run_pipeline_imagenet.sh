@@ -208,6 +208,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --model_s ${MODEL_S} \
         --path_s_cp "${STUDENT_DIR}/${MODEL_S}_best_cp.pth" \
         --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_best_tucker.pth" \
+        --torch_compile \
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
