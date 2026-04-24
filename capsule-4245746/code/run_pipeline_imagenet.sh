@@ -18,6 +18,7 @@ PYTHON="python3"                     # or: /path/to/venv/bin/python
 DATASET="imagenet100"
 MODEL_T="ResNet34"
 MODEL_S="ResNet18"
+TRIAL=1
 NUM_LAYERS=16                        # ResNet34 has 16 BasicBlock sub-blocks
 NUM_CLUSTERS=4                       # 4 hint points for ImageNet experiments
 METRIC="r2"
@@ -37,10 +38,14 @@ TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_last.pth"
 HINTS_DIR="./save/hints/${MODEL_T}_imagenet100"
 
 # Student training loss weights
-GAMMA=2.5
-ALPHA=0.75
-BETA=250.0
-TRIAL=1
+GAMMA=1.0
+ALPHA=0.5
+BETA=150.0
+
+# CP / Tucker Rank Ratios and CMTF Rank
+CP_RANK_RATIO=0.5
+TUCKER_RANK_RATIO=0.25
+CMTF_RANK=8
 
 # Log file
 LOG_DIR="./save/logs"
@@ -167,6 +172,10 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --path_t "${TEACHER_PATH}" \
         --distill pursuhint_cmtf \
         --dual_cmtf \
+        --trial ${TRIAL} \
+        --cp_rank_ratio ${CP_RANK_RATIO} \
+        --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
+        --cmtf_rank ${CMTF_RANK} \
         --epochs ${STUDENT_EPOCHS} \
         --lr ${LR} \
         --batch-size ${BATCH} \
@@ -175,7 +184,6 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --gamma ${GAMMA} \
         --alpha ${ALPHA} \
         --beta ${BETA} \
-        --trial ${TRIAL} \
         ${DALI_FLAG} \
         "${IMAGENET_DIR}" >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
@@ -198,8 +206,10 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
         --model_s ${MODEL_S} \
-        --path_s_cp "${STUDENT_DIR}/${MODEL_S}_last_cp.pth" \
-        --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_last_tucker.pth" >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
+        --path_s_cp "${STUDENT_DIR}/${MODEL_S}_best_cp.pth" \
+        --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_best_tucker.pth" \
+        --cp_rank_ratio ${CP_RANK_RATIO} \
+        --tucker_rank_ratio ${TUCKER_RANK_RATIO} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
     echo "[5/5] SKIPPED (RUN_EVALUATION=0)"
 fi

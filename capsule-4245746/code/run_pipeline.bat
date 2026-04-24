@@ -14,25 +14,32 @@ set DATASET=cifar100
 set MODEL_T=wrn_40_2
 set MODEL_S=wrn_16_2
 set LOG=.\save\logs\%MODEL_T%_%DATASET%_log.txt
+set TRIAL=0
 set NUM_LAYERS=18
 set NUM_CLUSTERS=3
 set METRIC=r2
-set EPOCHS=3
-set LEARNING_RATE=0.01
+set EPOCHS=1
+set LEARNING_RATE=0.1
 set LR_DECAY_EPOCHS=60,120,160
 set BATCH=64
 set NUM_WORKERS=4
 
 set HINTS_DIR=.\save\hints\%MODEL_T%_%DATASET%_last
-set TEACHER_PATH=.\save\models\%MODEL_T%_%DATASET%_lr_%LEARNING_RATE%_decay_0.0005_trial_0\%MODEL_T%_best.pth
+set TEACHER_PATH=.\save\models\%MODEL_T%_%DATASET%_lr_%LEARNING_RATE%_decay_0.0005_trial_%TRIAL%\%MODEL_T%_best.pth
 
 REM ============================================================
 REM Student training loss weights
 REM ============================================================
-set GAMMA=2.5
-set ALPHA=0.75
-set BETA=250.0
-set BETA2=1.0
+set GAMMA=1.0
+set ALPHA=0.5
+set BETA=150.0
+
+REM ============================================================
+REM CP / Tucker Rank Ratios and CMTF Rank
+REM ============================================================
+set CP_RANK_RATIO=0.5
+set TUCKER_RANK_RATIO=0.25
+set CMTF_RANK=8
 
 REM ============================================================
 REM [1/4] Train Teacher
@@ -44,8 +51,9 @@ echo [1/4] Training Teacher (%MODEL_T%) on %DATASET%...
     --epochs %EPOCHS% ^
     --learning_rate %LEARNING_RATE% ^
     --lr_decay_epochs %LR_DECAY_EPOCHS% ^
-    --batch_size %BATCH% > %LOG% 2>&1 ^
-    --num_workers %NUM_WORKERS%
+    --batch_size %BATCH% ^
+    --num_workers %NUM_WORKERS% ^
+    --trial %TRIAL% >> "%LOG%" 2>&1
 echo Teacher training complete. >> %LOG%
 
 REM ============================================================
@@ -114,6 +122,10 @@ echo [4/4] Training students with hint_points=%HINT_POINTS%... >> %LOG% 2>&1
     --path_t %TEACHER_PATH% ^
     --distill pursuhint_cmtf ^
     --dual_cmtf ^
+    --trial %TRIAL% ^
+    --cp_rank_ratio %CP_RANK_RATIO% ^
+    --tucker_rank_ratio %TUCKER_RANK_RATIO% ^
+    --cmtf_rank %CMTF_RANK% ^
     --epochs %EPOCHS% ^
     --learning_rate %LEARNING_RATE% ^
     --lr_decay_epochs %LR_DECAY_EPOCHS% ^
@@ -133,7 +145,7 @@ REM ============================================================
 echo [5/5] Running Evaluation Metrics...
 
 REM We must use delayed expansion (!HINT_POINTS!) because the hint variable is loaded dynamically
-set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODEL_T%_%DATASET%_pursuhint_cmtf_r-%GAMMA%_a-%ALPHA%_b-%BETA%_b2-%BETA2%_1
+set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODEL_T%_%DATASET%_pursuhint_cmtf_r-%GAMMA%_a-%ALPHA%_b-%BETA%_b2-1.0_%TRIAL%
 
 %PYTHON% evaluate_metrics.py ^
     --dataset %DATASET% ^
@@ -141,7 +153,9 @@ set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODE
     --path_t "%TEACHER_PATH%" ^
     --model_s %MODEL_S% ^
     --path_s_cp "!STUDENT_DIR!\%MODEL_S%_best_cp.pth" ^
-    --path_s_tucker "!STUDENT_DIR!\%MODEL_S%_best_tucker.pth" >> %LOG% 2>&1
+    --path_s_tucker "!STUDENT_DIR!\%MODEL_S%_best_tucker.pth" ^
+    --cp_rank_ratio %CP_RANK_RATIO% ^
+    --tucker_rank_ratio %TUCKER_RANK_RATIO% >> %LOG% 2>&1
 
 echo.
 echo ============================================================

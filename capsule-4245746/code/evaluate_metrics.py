@@ -14,6 +14,7 @@ import argparse
 import sys
 import json
 import os
+import copy
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -55,6 +56,9 @@ def parse_option():
                         help='path to Tucker-decomposed student checkpoint')
     parser.add_argument('--tucker_rank_ratio', type=float, default=0.5,
                         help='Tucker rank ratio used during training')
+
+    # PyTorch model compile optimization
+    parser.add_argument('--torch_compile', action='store_true')
 
     # Output
     parser.add_argument('--save_path', type=str,
@@ -99,12 +103,19 @@ def measure_model(model, dataset='cifar10', device='cpu'):
 def load_checkpoint(model, checkpoint_path):
     """Load model weights from a checkpoint file, handling DataParallel prefixes."""
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
-    state_dict = ckpt['model']
+
+    if isinstance(ckpt, dict) and 'model' in ckpt:
+        state_dict = ckpt['model']
+    elif isinstance(ckpt, dict) and 'state_dict' in ckpt:
+        state_dict = ckpt['state_dict']
+    else:
+        state_dict = ckpt 
+        
     try:
         model.load_state_dict(state_dict)
     except RuntimeError:
-        # Try removing 'module.' prefix (saved from DataParallel)
         try:
+            from for_init import remove_module, add_module
             model.load_state_dict(remove_module(state_dict))
         except RuntimeError:
             model.load_state_dict(add_module(state_dict))
@@ -113,17 +124,22 @@ def load_checkpoint(model, checkpoint_path):
 
 def evaluate_model(model, model_name, val_loader, criterion, opt, device):
     """Run full evaluation on a single model: accuracy + efficiency metrics."""
-    model.to(device)
-    model.eval()
-
-    # --- Accuracy ---
-    top1_acc, top5_acc, val_loss = validate(val_loader, model, criterion, opt)
-
-    # --- Efficiency (on CPU for comparable latency) ---
-    # Use a clean copy on CPU for thop profiling
-    model_cpu = model.cpu()
+    
+    # --- 1. Efficiency (on CPU, UNCOMPILED) ---
+    # We MUST run THOP on a clean, uncompiled CPU model, otherwise thop.profile will crash.    model_cpu = model.cpu()
+    model_cpu = copy.deepcopy(model).cpu()
+    model_cpu.eval()
     params, macs, latency = measure_model(model_cpu, dataset=opt.dataset, device='cpu')
     macs_str, params_str = clever_format([macs, params], "%.3f")
+
+    # --- 2. Compile for Speed ---
+    model.to(device)
+    if opt.torch_compile and device == 'cuda':
+        model = torch.compile(model)
+    model.eval()
+
+    # --- 3. Accuracy Evaluation ---
+    top1_acc, top5_acc, val_loss = validate(val_loader, model, criterion, opt)
 
     # Convert tensor to float if needed
     if hasattr(top1_acc, 'item'):
@@ -204,8 +220,7 @@ def evaluate():
     if opt.path_s_cp:
         print(f"\n--- Evaluating Student (CP): {opt.model_s} ---")
         student_cp = model_dict[opt.model_s](num_classes=n_cls)
-        student_cp = decompose_model(student_cp, method='cp',
-                                      cp_rank_ratio=opt.cp_rank_ratio)
+        student_cp = decompose_model(student_cp, method='cp', cp_rank_ratio=opt.cp_rank_ratio)
         student_cp = load_checkpoint(student_cp, opt.path_s_cp)
         if torch.cuda.is_available():
             student_cp = student_cp.cuda()
@@ -219,8 +234,7 @@ def evaluate():
     if opt.path_s_tucker:
         print(f"\n--- Evaluating Student (Tucker): {opt.model_s} ---")
         student_tk = model_dict[opt.model_s](num_classes=n_cls)
-        student_tk = decompose_model(student_tk, method='tucker',
-                                      tucker_rank_ratio=opt.tucker_rank_ratio)
+        student_tk = decompose_model(student_tk, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio)
         student_tk = load_checkpoint(student_tk, opt.path_s_tucker)
         if torch.cuda.is_available():
             student_tk = student_tk.cuda()
