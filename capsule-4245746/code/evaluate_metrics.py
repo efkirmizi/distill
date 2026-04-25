@@ -135,7 +135,7 @@ def evaluate_model(model, model_name, val_loader, criterion, opt, device):
     # --- 2. Compile for Speed ---
     model.to(device)
     if opt.torch_compile and device == 'cuda':
-        model = torch.compile(model)
+        model = torch.compile(model, dynamic=True)
     model.eval()
 
     # --- 3. Accuracy Evaluation ---

@@ -316,8 +316,14 @@ def main():
         model = model.cuda()
         cudnn.benchmark = True
 
+        # Compile FIRST
         if opt.torch_compile:
-            model = torch.compile(model)
+            model = torch.compile(model, dynamic=True)
+
+        # Wrap in DataParallel SECOND
+        if torch.cuda.device_count() > 1:
+            print(f"==> Using {torch.cuda.device_count()} GPUs for Teacher Training!")
+            model = nn.DataParallel(model)
 
     # ---- Optimizer ----
     optimizer = optim.SGD(model.parameters(),

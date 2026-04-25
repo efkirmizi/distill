@@ -438,21 +438,11 @@ def main():
     if args.dual_cmtf:
         model_s2 = model_s2.cuda()
 
-    # ---- Compile student models ----
-    if args.torch_compile:
-        model_s = torch.compile(model_s)
-        if args.dual_cmtf:
-            model_s2 = torch.compile(model_s2)
-
     # ---- Load teacher (only if doing distillation) ----
     teacher = None
     if args.distill is not None:
         teacher = load_teacher(args.path_t, n_cls, args.model_t).cuda()
         teacher.eval()
-
-        # Compile teacher model
-        if args.torch_compile:
-            teacher = torch.compile(teacher)
 
     # ---- Build module_list / trainable_list / criterion_list ----
     module_list = nn.ModuleList([model_s])
@@ -566,9 +556,25 @@ def main():
         model_s = DDP(model_s, delay_allreduce=True)
         if args.dual_cmtf:
             model_s2 = DDP(model_s2, delay_allreduce=True)
+
+    # ---- Compile student models ----
+    if args.torch_compile:
+        model_s = torch.compile(model_s, dynamic=True)
+        if args.dual_cmtf:
+            model_s2 = torch.compile(model_s2, dynamic=True)
         if teacher is not None:
-            teacher = DDP(teacher, delay_allreduce=True)
-    
+            teacher = torch.compile(teacher, dynamic=True)
+        
+        # Update the module lists so the training loop uses the compiled versions!
+        module_list[0] = model_s
+        if teacher is not None:
+            module_list[-1] = teacher
+            
+        if args.dual_cmtf:
+            module_list_2[0] = model_s2
+            if teacher is not None:
+                module_list_2[-1] = teacher
+
     # ---- Resume ----
     if args.resume:
         if os.path.isdir(args.resume):
@@ -1156,7 +1162,7 @@ def accuracy(output, target, topk=(1,)):
 
 def reduce_tensor(tensor):
     rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.reduce_op.SUM)
+    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
     rt /= args.world_size
     return rt
 

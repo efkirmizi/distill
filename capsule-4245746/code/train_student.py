@@ -239,17 +239,18 @@ def main():
             print(f"==> Decomposing parallel student model using Tucker factorization (ratio: {opt.tucker_rank_ratio})...")
             model_s2 = decompose_model(model_s2, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio)
     
+    # ---- Compile models FIRST (Before threading!) ----
+    if opt.torch_compile:
+        model_s = torch.compile(model_s, dynamic=True)
+        model_t = torch.compile(model_t, dynamic=True)
+        if opt.dual_cmtf:
+            model_s2 = torch.compile(model_s2, dynamic=True)
+
+    # ---- Wrap in DataParallel SECOND ----
     model_s = nn.DataParallel(model_s).cuda()
     model_t = nn.DataParallel(model_t).cuda()
     if opt.dual_cmtf:
         model_s2 = nn.DataParallel(model_s2).cuda()
-
-    # ---- Compile models ----
-    if opt.torch_compile:
-        model_s = torch.compile(model_s)
-        model_t = torch.compile(model_t)
-        if opt.dual_cmtf:
-            model_s2 = torch.compile(model_s2)
     
     if opt.path_s:
         try:

@@ -124,7 +124,7 @@ def main():
         cudnn.benchmark = True
         
         if opt.torch_compile:
-            model = torch.compile(model)
+            model = torch.compile(model, dynamic=True)
 
     # tensorboard
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
