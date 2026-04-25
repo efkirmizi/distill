@@ -424,7 +424,8 @@ def main():
         #module_list = nn.DataParallel(module_list)
         module_list = module_list.cuda()
         criterion_list.cuda()
-        cudnn.benchmark = True
+        cudnn.benchmark = False
+        cudnn.deterministic = True
 
     # validate teacher accuracy
     teacher_acc, _, _ = validate(val_loader, model_t, criterion_cls, opt)
