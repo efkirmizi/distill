@@ -76,7 +76,8 @@ def get_cifar10_dataloaders(batch_size=128, num_workers=8, is_instance=False):
                               shuffle=True,
                               num_workers=num_workers,
                               pin_memory=True,
-                              persistent_workers=True)
+                              persistent_workers=True,
+                              drop_last=True)
 
     test_set = datasets.CIFAR10(root=data_folder,
                                  download=True,
@@ -87,7 +88,8 @@ def get_cifar10_dataloaders(batch_size=128, num_workers=8, is_instance=False):
                              shuffle=False,
                              num_workers=int(num_workers/2),
                              pin_memory=True,
-                             persistent_workers=True)
+                             persistent_workers=True,
+                             drop_last=True)
 
     if is_instance:
         return train_loader, test_loader, n_data
@@ -193,7 +195,8 @@ def get_cifar10_dataloaders_sample(batch_size=128, num_workers=8, k=4096, mode='
                               shuffle=True,
                               num_workers=num_workers,
                               pin_memory=True,
-                              persistent_workers=True)
+                              persistent_workers=True,
+                              drop_last=True)
 
     test_set = datasets.CIFAR10(root=data_folder,
                                  download=True,
@@ -204,6 +207,7 @@ def get_cifar10_dataloaders_sample(batch_size=128, num_workers=8, k=4096, mode='
                              shuffle=False,
                              num_workers=int(num_workers/2),
                              pin_memory=True,
-                             persistent_workers=True)
+                             persistent_workers=True,
+                             drop_last=True)
 
     return train_loader, test_loader, n_data

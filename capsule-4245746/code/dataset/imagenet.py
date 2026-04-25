@@ -127,7 +127,8 @@ def get_test_loader(dataset='imagenet', batch_size=128, num_workers=8):
                              batch_size=batch_size,
                              shuffle=False,
                              num_workers=num_workers,
-                             pin_memory=True)
+                             pin_memory=True,
+                             drop_last=True)
 
     return test_loader
 
@@ -165,12 +166,14 @@ def get_dataloader_sample(dataset='imagenet', batch_size=128, num_workers=8, is_
                               batch_size=batch_size,
                               shuffle=True,
                               num_workers=num_workers,
-                              pin_memory=True)
+                              pin_memory=True,
+                              drop_last=True)
     test_loader = DataLoader(test_set,
                              batch_size=batch_size,
                              shuffle=False,
                              num_workers=num_workers,
-                             pin_memory=True)
+                             pin_memory=True,
+                             drop_last=True)
 
     print('num_samples', len(train_set.samples))
     print('num_class', len(train_set.classes))
@@ -217,13 +220,15 @@ def get_imagenet_dataloader(dataset='imagenet', batch_size=128, num_workers=16, 
                               batch_size=batch_size,
                               shuffle=True,
                               num_workers=num_workers,
-                              pin_memory=True)
+                              pin_memory=True,
+                              drop_last=True)
 
     test_loader = DataLoader(test_set,
                              batch_size=batch_size,
                              shuffle=False,
                              num_workers=num_workers//2,
-                             pin_memory=True)
+                             pin_memory=True,
+                             drop_last=True)
 
     if is_instance:
         return train_loader, test_loader, n_data
