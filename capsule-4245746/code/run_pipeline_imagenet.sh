@@ -74,7 +74,6 @@ if [ "$RUN_TEACHER" -eq 1 ]; then
 
     ${PYTHON} train_teacher_imagenet100.py \
         --model ${MODEL_T} \
-        --torch_compile \
         --data_folder "${IMAGENET_DIR}" \
         --epochs ${TEACHER_EPOCHS} \
         --batch_size ${BATCH} \

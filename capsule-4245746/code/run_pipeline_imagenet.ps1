@@ -50,8 +50,8 @@ $HINTS_DIR = ".\save\hints\${MODEL_T}_${DATASET}"
 
 # Student training loss weights
 $GAMMA = "1.0"
-$ALPHA = "0.5"
-$BETA = "150.0"
+$ALPHA = "2.0"
+$BETA = "400.0"
 
 # CP / Tucker Rank Ratios and CMTF Rank
 $CP_RANK_RATIO = 0.5
@@ -67,10 +67,10 @@ Write-Host "Log file: $LOG"
 # ==============================================================================
 # Flags  (set to 1 to enable, 0 to skip a step)
 # ==============================================================================
-$RUN_TEACHER = 0
-$RUN_HINTS = 0
-$RUN_CLUSTERING = 0
-$RUN_TRAINING = 0
+$RUN_TEACHER = 1
+$RUN_HINTS = 1
+$RUN_CLUSTERING = 1
+$RUN_TRAINING = 1
 $RUN_EVALUATION = 1
 
 $USE_NO_DALI = 1

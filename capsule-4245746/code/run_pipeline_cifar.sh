@@ -68,7 +68,6 @@ if [ "$RUN_TEACHER" -eq 1 ]; then
     ${PYTHON} train_teacher.py \
         --dataset ${DATASET} \
         --model ${MODEL_T} \
-        --torch_compile \
         --epochs ${EPOCHS} \
         --learning_rate ${LR} \
         --weight_decay ${WEIGHT_DECAY} \
