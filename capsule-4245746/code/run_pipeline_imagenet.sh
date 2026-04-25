@@ -168,7 +168,6 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
     ${PYTHON} -m torch.distributed.launch --master_port 9200 --nproc_per_node=${NUM_GPUS} train_stu_imagenet100.py \
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
-        --torch_compile \
         --path_t "${TEACHER_PATH}" \
         --distill pursuhint_cmtf \
         --dual_cmtf \
@@ -208,7 +207,6 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --model_s ${MODEL_S} \
         --path_s_cp "${STUDENT_DIR}/${MODEL_S}_best_cp.pth" \
         --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_best_tucker.pth" \
-        --torch_compile \
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
