@@ -28,12 +28,18 @@ def parse_args():
 
 
 def load_teacher(model_path, n_cls, model_t):
+    """Robustly loads a teacher model, handling wrappers and compile/parallel prefixes."""
     print('==> Loading teacher model for hint extraction...')
     model = model_dict[model_t](num_classes=n_cls)
+    
+    ckpt = torch.load(model_path, map_location='cpu', weights_only=False)
+    state_dict = ckpt['model'] if isinstance(ckpt, dict) and 'model' in ckpt else ckpt
+    
     try:
-        model.load_state_dict(remove_module(torch.load(model_path, map_location='cpu', weights_only=False)['model']))
-    except Exception:
-        model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=False)['model'])
+        model.load_state_dict(state_dict)
+    except RuntimeError:
+        model.load_state_dict(remove_module(state_dict))
+        
     print('==> Done.')
     return model
 

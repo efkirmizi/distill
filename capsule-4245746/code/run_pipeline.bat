@@ -31,8 +31,8 @@ REM ============================================================
 REM Student training loss weights
 REM ============================================================
 set GAMMA=1.0
-set ALPHA=0.5
-set BETA=150.0
+set ALPHA=2.0
+set BETA=400.0
 
 REM ============================================================
 REM CP / Tucker Rank Ratios and CMTF Rank
