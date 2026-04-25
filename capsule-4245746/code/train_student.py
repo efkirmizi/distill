@@ -441,9 +441,15 @@ def main():
 
     teacher_dict = {}
     print("==> Precomputing teacher outputs to save compute...")
+    
+    precompute_loader = torch.utils.data.DataLoader(
+        train_loader.dataset, batch_size=opt.batch_size, 
+        shuffle=False, num_workers=opt.num_workers, drop_last=False
+    )
+
     model_t.eval()
     with torch.no_grad():
-        for idx, data in enumerate(train_loader):
+        for idx, data in enumerate(precompute_loader):
             if opt.distill in ['crd', 'WSL_crd', 'ATT_crd']:
                 input_t, _, index_t, _ = data
             else:
