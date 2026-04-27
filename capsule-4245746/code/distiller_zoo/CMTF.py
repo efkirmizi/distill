@@ -1,3 +1,4 @@
+import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -145,8 +146,7 @@ class CoupledTensorLoss(nn.Module):
                         loss += self._align_and_compare(cov_w_h, cov_t_h)
                         loss += self._align_and_compare(cov_w_w, cov_t_w)
 
-                except Exception:
-                    # Fallback: Part 1 attention matching still provides the gradient
-                    pass
+                except Exception as e:
+                    warnings.warn(f"CMTF Part 2 (structural coupling) failed and was skipped: {e}", stacklevel=2)
 
         return loss

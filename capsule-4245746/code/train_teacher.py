@@ -121,8 +121,7 @@ def main():
     if torch.cuda.is_available():
         model = model.cuda()
         criterion = criterion.cuda()
-        cudnn.benchmark = True
-        
+
         if opt.torch_compile:
             model = torch.compile(model, dynamic=True)
 

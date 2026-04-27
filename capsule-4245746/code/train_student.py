@@ -132,6 +132,9 @@ def parse_option():
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
+    if opt.dual_cmtf and opt.distill != 'pursuhint_cmtf':
+        raise ValueError("--dual_cmtf requires --distill pursuhint_cmtf")
+
     if not opt.model_t:
         opt.model_t = get_teacher_name(opt.path_t)
 
@@ -486,6 +489,8 @@ def main():
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
 
     scaler = torch.amp.GradScaler('cuda')
+    if opt.dual_cmtf:
+        scaler_2 = torch.amp.GradScaler('cuda')
     # routine
 
     print('the number of teacher model parameters: {}'.format(sum([p.data.nelement() for p in model_t.parameters()])))
@@ -527,7 +532,7 @@ def main():
         
         if opt.dual_cmtf:
             time1 = time.time()
-            train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2 = train(epoch, train_loader, module_list_2, criterion_list_2, optimizer_2, opt, scaler=scaler, teacher_cache=teacher_cache)
+            train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2 = train(epoch, train_loader, module_list_2, criterion_list_2, optimizer_2, opt, scaler=scaler_2, teacher_cache=teacher_cache)
             time2 = time.time()
             epoch_time_tucker = time2 - time1
 

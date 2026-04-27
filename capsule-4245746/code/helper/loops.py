@@ -140,30 +140,8 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         with torch.amp.autocast('cuda', enabled=scaler is not None):
             feat_s, logit_s = model_s(input, is_feat=True, preact=preact)
 
-            #s_points are the last layers of blocks, unless it is specified:
-            #NOTE: s_points should be specified by args for ATT+CRD experiments.
-            if opt.s_points:
-                s_points = opt.s_points
-            else:
-
-                if opt.model_s == 'resnet8' or opt.model_s == 'resnet8x4':
-                    s_points = '1,2,3'
-                elif opt.model_s == 'resnet20':
-                    s_points = '3,6,9'
-                elif opt.model_s == 'resnet32':
-                    s_points = '5,10,15'
-                elif opt.model_s == 'resnet110':
-                    s_points = '18,36,54'
-                elif opt.model_s == 'ShuffleV1':
-                    s_points = '4,12,16'
-                elif opt.model_s == 'wrn_16_2':
-                    s_points = '2,4,6'
-                elif opt.model_s in ['vgg8', 'vgg11', 'vgg13', 'vgg16', 'vgg19']:
-                    s_points = opt.hint_points
-                else:
-                    raise NotImplementedError
-
-            feat_s = [feat_s[int(i)] for i in s_points.split(',')]
+            # s_points is always pre-populated by train_student.py before the loop starts
+            feat_s = [feat_s[int(i)] for i in opt.s_points.split(',')]
 
             if teacher_cache is not None:
                 # Fast vectorized lookup from pre-stacked tensors
