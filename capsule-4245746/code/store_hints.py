@@ -51,7 +51,7 @@ def main():
     if opt.dataset == 'cifar10':
         n_cls = 10
         mean = (0.4914, 0.4822, 0.4465)
-        std  = (0.2023, 0.1994, 0.2010)
+        std  = (0.2470, 0.2435, 0.2616)
         # Number of sub-blocks (feature map outputs) for each supported teacher
         ch_dicts = {
             'wrn_40_2': [32, 32, 32, 32, 32, 32, 64, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128, 128],
@@ -119,7 +119,7 @@ def main():
     # Extract hint for sub-block opt.g
     i = opt.g
     hint_name = os.path.join(opt.hints_path, f'hint{i}.pt')
-    hint_curr = np.empty([0, ch_dict[i - 1]])
+    all_hints = []
 
     use_cuda = torch.cuda.is_available()
 
@@ -133,9 +133,9 @@ def main():
                 # Get the desired sub-block output, spatially average H×W dims -> (batch, C)
                 hint_ = hints[int(i)]
                 hint_ = torch.mean(hint_, dim=(2, 3)).cpu().detach().numpy()
-                hint_curr = np.concatenate((hint_curr, hint_), axis=0)
-                torch.cuda.empty_cache()
+                all_hints.append(hint_)
 
+    hint_curr = np.concatenate(all_hints, axis=0)
     torch.save(hint_curr, hint_name)
     print(f'==> Saved hint {i}: shape={hint_curr.shape} -> {hint_name}')
 

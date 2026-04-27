@@ -142,7 +142,7 @@ class ConvReg(nn.Module):
         elif s_H >= t_H:
             self.conv = nn.Conv2d(s_C, t_C, kernel_size=(1+s_H-t_H, 1+s_W-t_W))
         else:
-            raise NotImplemented('student size {}, teacher size {}'.format(s_H, t_H))
+            raise NotImplementedError('student size {}, teacher size {}'.format(s_H, t_H))
         self.bn = nn.BatchNorm2d(t_C)
         self.relu = nn.ReLU(inplace=True)
 

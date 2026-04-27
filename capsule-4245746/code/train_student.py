@@ -9,6 +9,7 @@ import argparse
 import time
 import csv
 import json
+import copy
 
 import torch
 import torch.optim as optim
@@ -229,7 +230,6 @@ def main():
 
     model_s = model_dict[opt.model_s](num_classes=n_cls)
     if opt.dual_cmtf:
-        import copy
         model_s2 = copy.deepcopy(model_s)
 
     if opt.distill == 'pursuhint_cmtf':
@@ -258,26 +258,10 @@ def main():
         except Exception:
             model_s.load_state_dict((torch.load(opt.path_s, map_location='cpu', weights_only=False)['model']))
 
-    if opt.dataset in ['cifar10', 'cifar100']:
-        data = torch.randn(2, 3, 32, 32).cuda()
-    elif opt.dataset == 'imagenet':
-        data = torch.randn(2, 3, 224, 224).cuda()
-    model_t.eval()
-    model_s.eval()
-    feat_t, _ = model_t(data, is_feat=True)
-    feat_s, _ = model_s(data, is_feat=True)
-    if opt.dual_cmtf:
-        model_s2.eval()
-        feat_s2, _ = model_s2(data, is_feat=True)
-    
-    feat_t = [feat_t[int(i)] for i in opt.hint_points.split(',')] 
-
-    #s_points are the last layers of blocks, unless it is specified:
-    #NOTE: s_points should be specified by args for ATT+CRD experiments.
+    # Determine s_points (student hint positions) BEFORE probing, so we only extract what we need
     if opt.s_points:
         s_points = opt.s_points
     else:
-
         if opt.model_s == 'resnet8' or opt.model_s == 'resnet8x4':
             s_points = '1,2,3'
         elif opt.model_s == 'resnet20':
@@ -297,8 +281,25 @@ def main():
         else:
             raise NotImplementedError
 
+    # Probe feature shapes (needed for ConvReg, VID, etc.)
+    if opt.dataset in ['cifar10', 'cifar100']:
+        data = torch.randn(2, 3, 32, 32).cuda()
+    elif opt.dataset == 'imagenet':
+        data = torch.randn(2, 3, 224, 224).cuda()
+
+    model_t.eval()
+    model_s.eval()
+    with torch.no_grad():
+        feat_t, _ = model_t(data, is_feat=True)
+        feat_s, _ = model_s(data, is_feat=True)
+
+    feat_t = [feat_t[int(i)] for i in opt.hint_points.split(',')]
     feat_s = [feat_s[int(i)] for i in s_points.split(',')]
+
     if opt.dual_cmtf:
+        model_s2.eval()
+        with torch.no_grad():
+            feat_s2, _ = model_s2(data, is_feat=True)
         feat_s2 = [feat_s2[int(i)] for i in s_points.split(',')]
 
 
@@ -421,9 +422,11 @@ def main():
         module_list_2.append(model_t)
 
     if torch.cuda.is_available():
-        #module_list = nn.DataParallel(module_list)
         module_list = module_list.cuda()
         criterion_list.cuda()
+        if opt.dual_cmtf:
+            module_list_2 = module_list_2.cuda()
+            criterion_list_2.cuda()
         cudnn.benchmark = False
         cudnn.deterministic = True
 
@@ -439,13 +442,19 @@ def main():
         student2_acc, _, _ = validate(val_loader, model_s2, criterion_cls, opt)
         print('student Tucker accuracy: ', student2_acc)
 
-    teacher_dict = {}
     print("==> Precomputing teacher outputs to save compute...")
     
     precompute_loader = torch.utils.data.DataLoader(
         train_loader.dataset, batch_size=opt.batch_size, 
         shuffle=False, num_workers=opt.num_workers, drop_last=False
     )
+
+    n_data = len(train_loader.dataset)
+    hint_indices = [int(i) for i in opt.hint_points.split(',')]
+
+    # Pre-allocate tensors for fast batch indexing (replaces slow per-sample dict)
+    teacher_logits = torch.zeros(n_data, n_cls)
+    teacher_feats = None  # will be initialized on first batch
 
     model_t.eval()
     with torch.no_grad():
@@ -456,12 +465,21 @@ def main():
                 input_t, _, index_t = data
             input_t = input_t.float().cuda()
             with torch.amp.autocast('cuda', enabled=True):
-                feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=False)
-                feat_t_batch = [feat_t_batch[int(i)].detach().cpu() for i in opt.hint_points.split(',')]
+                feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=opt.preact)
+                feat_t_selected = [feat_t_batch[hi].detach().cpu() for hi in hint_indices]
                 logit_t_batch = logit_t_batch.detach().cpu()
 
-            for b in range(len(index_t)):
-                teacher_dict[index_t[b].item()] = ([f[b] for f in feat_t_batch], logit_t_batch[b])
+            # Initialize storage tensors on first batch
+            if teacher_feats is None:
+                teacher_feats = [torch.zeros(n_data, *f.shape[1:]) for f in feat_t_selected]
+
+            teacher_logits[index_t] = logit_t_batch.float()
+            for hp_idx, f in enumerate(feat_t_selected):
+                teacher_feats[hp_idx][index_t] = f.float()
+
+    teacher_cache = (teacher_logits, teacher_feats)
+    print(f'==> Teacher cache ready: logits {teacher_logits.shape}, '
+          f'{len(teacher_feats)} feat tensors')
 
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
 
@@ -489,7 +507,7 @@ def main():
                             'train_acc', 'train_acc_top5', 'train_loss', 
                             'train_loss_cls', 'train_loss_div', 'train_loss_kd',
                             'test_acc', 'test_acc_top5', 'test_loss', 'best_acc'])
-    print(f'Tucker CSV log: {csv_path_tk}')
+        print(f'Tucker CSV log: {csv_path_tk}')
 
     for epoch in range(opt.start_epoch, opt.epochs + 1):
 
@@ -501,17 +519,20 @@ def main():
         print('hint positions: ', opt.hint_points)
 
         time1 = time.time()
-        train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=scaler, teacher_dict=teacher_dict)
+        train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=scaler, teacher_cache=teacher_cache)
         time2 = time.time()
         epoch_time_cp = time2 - time1
         
         if opt.dual_cmtf:
             time1 = time.time()
-            train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2 = train(epoch, train_loader, module_list_2, criterion_list_2, optimizer_2, opt, scaler=scaler, teacher_dict=teacher_dict)
+            train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2 = train(epoch, train_loader, module_list_2, criterion_list_2, optimizer_2, opt, scaler=scaler, teacher_cache=teacher_cache)
             time2 = time.time()
             epoch_time_tucker = time2 - time1
 
-        print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time_cp + epoch_time_tucker))
+        if opt.dual_cmtf:
+            print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time_cp + epoch_time_tucker))
+        else:
+            print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time_cp))
 
         print('train_acc CP:', train_acc)
         print('train_loss CP:', train_loss)

@@ -90,7 +90,7 @@ def train_vanilla(epoch, train_loader, model, criterion, optimizer, opt, scaler=
     return top1.avg, top5.avg, losses.avg
 
 
-def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=None, teacher_dict=None):
+def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=None, teacher_cache=None):
     """One epoch distillation"""
     # set modules as train()
     for module in module_list:
@@ -165,22 +165,11 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
 
             feat_s = [feat_s[int(i)] for i in s_points.split(',')]
 
-            if teacher_dict is not None:
-                feat_t = []
-                # Fetch precomputed teacher outputs for this batch
-                batch_feat_t = []
-                batch_logit_t = []
-                for idx_val in index:
-                    f_t, l_t = teacher_dict[idx_val.item()]
-                    batch_feat_t.append(f_t)
-                    batch_logit_t.append(l_t)
-                
-                logit_t = torch.stack(batch_logit_t).cuda()
-                # Unpack list of features
-                num_hint_points = len(batch_feat_t[0])
-                for pt in range(num_hint_points):
-                    feat_t_pt = torch.stack([batch_feat_t[b][pt] for b in range(len(batch_feat_t))]).cuda()
-                    feat_t.append(feat_t_pt)
+            if teacher_cache is not None:
+                # Fast vectorized lookup from pre-stacked tensors
+                teacher_logits, teacher_feats = teacher_cache
+                logit_t = teacher_logits[index.cpu()].cuda()
+                feat_t = [f[index.cpu()].cuda() for f in teacher_feats]
             else:
                 with torch.no_grad():
                     feat_t, logit_t = model_t(input, is_feat=True, preact=preact)
@@ -247,7 +236,12 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             elif opt.distill == 'pursuhint_cmtf':
                 f_s = feat_s
                 f_t = feat_t
-                loss_kd = criterion_kd(f_s, f_t)
+                # Disable autocast for CMTF: parafac() uses FP64 ALS internally
+                with torch.amp.autocast('cuda', enabled=False):
+                    loss_kd = criterion_kd(
+                        [f.float() for f in f_s],
+                        [f.float() for f in f_t]
+                    )
             else:
                 raise NotImplementedError(opt.distill)
 
@@ -341,4 +335,3 @@ def validate(val_loader, model, criterion, opt):
               .format(top1=top1, top5=top5))
 
     return top1.avg, top5.avg, losses.avg
-

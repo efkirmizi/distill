@@ -100,6 +100,10 @@ class Bottleneck(nn.Module):
         self.stride = stride
 
     def forward(self, x):
+        if isinstance(x, tuple):
+            x, features = x
+        else:
+            features = []
         identity = x
 
         out = self.conv1(x)
@@ -119,7 +123,7 @@ class Bottleneck(nn.Module):
         out += identity
         out = self.relu(out)
 
-        return out
+        return out, features + [out]
 
 
 class ResNet(nn.Module):

@@ -150,7 +150,7 @@ def main():
     # ---- Extract hint for sub-block opt.g ----
     i = opt.g
     hint_name = os.path.join(opt.hints_path, f'hint{i}.pt')
-    hint_curr = np.empty([0, ch_dict[i - 1]])
+    all_hints = []
 
     use_cuda = torch.cuda.is_available()
 
@@ -166,11 +166,11 @@ def main():
                 # Spatially average H x W dims -> (batch, C)
                 hint_ = hints[0]
                 hint_ = torch.mean(hint_, dim=(2, 3)).cpu().detach().numpy()
-                hint_curr = np.concatenate((hint_curr, hint_), axis=0)
+                all_hints.append(hint_)
 
                 del inputs, hint_
-                torch.cuda.empty_cache()
 
+    hint_curr = np.concatenate(all_hints, axis=0)
     torch.save(hint_curr, hint_name)
     print(f'==> Saved hint {i}: shape={hint_curr.shape} -> {hint_name}')
 

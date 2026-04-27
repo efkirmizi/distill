@@ -37,7 +37,7 @@ class WSLLoss(nn.Module):
 
         self.T = T
         self.softmax = nn.Softmax(dim=1)#.cuda()
-        self.logsoftmax = nn.LogSoftmax()#.cuda()
+        self.logsoftmax = nn.LogSoftmax(dim=1)#.cuda()
 
 
 
@@ -55,7 +55,7 @@ class WSLLoss(nn.Module):
         fc_t_auto = g_t.detach()
         log_softmax_s = self.logsoftmax(fc_s_auto)
         log_softmax_t = self.logsoftmax(fc_t_auto)
-        one_hot_label = F.one_hot(target, num_classes=100).float() #for cifar100
+        one_hot_label = F.one_hot(target, num_classes=g_s.size(1)).float() #for cifar100
         softmax_loss_s = - torch.sum(one_hot_label * log_softmax_s, 1, keepdim=True)
         softmax_loss_t = - torch.sum(one_hot_label * log_softmax_t, 1, keepdim=True)
 

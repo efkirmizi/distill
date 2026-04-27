@@ -30,14 +30,16 @@ class BasicBlock(nn.Module):
     def forward(self, x):
         if isinstance(x, tuple):
             x, features = x
-            features.append(self.bn1(x))
         else:
-            features = [self.bn1(x)]
+            features = []
+
+        bn1_out = self.bn1(x)
+        features.append(bn1_out)
 
         if not self.equalInOut:
-            x = self.relu1(self.bn1(x))
+            x = self.relu1(bn1_out)
         else:
-            out = self.relu1(self.bn1(x))
+            out = self.relu1(bn1_out)
         out = self.relu2(self.bn2(self.conv1(out if self.equalInOut else x)))
         if self.droprate > 0:
             out = F.dropout(out, p=self.droprate, training=self.training)

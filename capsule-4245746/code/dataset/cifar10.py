@@ -89,7 +89,7 @@ def get_cifar10_dataloaders(batch_size=128, num_workers=8, is_instance=False):
                              num_workers=int(num_workers/2),
                              pin_memory=True,
                              persistent_workers=True,
-                             drop_last=True)
+                             drop_last=False)
 
     if is_instance:
         return train_loader, test_loader, n_data
@@ -208,6 +208,6 @@ def get_cifar10_dataloaders_sample(batch_size=128, num_workers=8, k=4096, mode='
                              num_workers=int(num_workers/2),
                              pin_memory=True,
                              persistent_workers=True,
-                             drop_last=True)
+                             drop_last=False)
 
     return train_loader, test_loader, n_data
