@@ -482,6 +482,9 @@ def main():
             for hp_idx, f in enumerate(feat_t_selected):
                 teacher_feats[hp_idx][index_t] = f.float()
 
+    if torch.cuda.is_available():
+        teacher_logits = teacher_logits.pin_memory()
+        teacher_feats = [f.pin_memory() for f in teacher_feats]
     teacher_cache = (teacher_logits, teacher_feats)
     print(f'==> Teacher cache ready: logits {teacher_logits.shape}, '
           f'{len(teacher_feats)} feat tensors')

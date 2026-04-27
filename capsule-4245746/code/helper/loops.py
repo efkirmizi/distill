@@ -146,8 +146,9 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             if teacher_cache is not None:
                 # Fast vectorized lookup from pre-stacked tensors
                 teacher_logits, teacher_feats = teacher_cache
-                logit_t = teacher_logits[index.cpu()].cuda()
-                feat_t = [f[index.cpu()].cuda() for f in teacher_feats]
+                index_cpu = index.cpu()
+                logit_t = teacher_logits[index_cpu].cuda(non_blocking=True)
+                feat_t = [f[index_cpu].cuda(non_blocking=True) for f in teacher_feats]
             else:
                 with torch.no_grad():
                     feat_t, logit_t = model_t(input, is_feat=True, preact=preact)

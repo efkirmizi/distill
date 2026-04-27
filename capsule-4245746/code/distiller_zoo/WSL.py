@@ -60,7 +60,7 @@ class WSLLoss(nn.Module):
         softmax_loss_t = - torch.sum(one_hot_label * log_softmax_t, 1, keepdim=True)
 
         focal_weight = softmax_loss_s / (softmax_loss_t + 1e-7)
-        ratio_lower = torch.zeros(1).cuda()
+        ratio_lower = torch.zeros(1, device=focal_weight.device)
         focal_weight = torch.max(focal_weight, ratio_lower)
         focal_weight = 1 - torch.exp(- focal_weight)
         softmax_loss = focal_weight * softmax_loss

@@ -12,7 +12,8 @@ class ContrastMemory(nn.Module):
         self.nLem = outputSize
         self.unigrams = torch.ones(self.nLem)
         self.multinomial = AliasMethod(self.unigrams)
-        self.multinomial.cuda()
+        if torch.cuda.is_available():
+            self.multinomial.cuda()
         self.K = K
 
         self.register_buffer('params', torch.tensor([K, T, -1, -1, momentum]))

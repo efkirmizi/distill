@@ -97,7 +97,10 @@ class KMeans:
         # Initialize centroids: first, center, and last layer (paper's seeding strategy)
         self.centroids = {}
         for t in range(self.k):
-            self.centroids[t] = int(t * (self.num_all_layers - 1) / (self.k - 1))
+            if self.k == 1:
+                self.centroids[t] = (self.num_all_layers - 1) // 2
+            else:
+                self.centroids[t] = int(t * (self.num_all_layers - 1) / (self.k - 1))
         logger.info(f"Initial centroids: {self.centroids}")
         self._fit_once(data)
         return self
