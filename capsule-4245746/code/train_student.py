@@ -280,6 +280,8 @@ def main():
             s_points = opt.hint_points
         else:
             raise NotImplementedError
+    # Persist so loops.py doesn't recompute every batch
+    opt.s_points = s_points
 
     # Probe feature shapes (needed for ConvReg, VID, etc.)
     if opt.dataset in ['cifar10', 'cifar100']:

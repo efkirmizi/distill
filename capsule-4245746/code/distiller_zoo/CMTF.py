@@ -29,6 +29,11 @@ class CoupledTensorLoss(nn.Module):
 
     def _find_decomposed_layers(self, module):
         """Recursively find all CPConv2d / TuckerConv2d layers."""
+        # Unwrap DataParallel / torch.compile wrappers
+        if hasattr(module, 'module'):
+            module = module.module
+        if hasattr(module, '_orig_mod'):
+            module = module._orig_mod
         for child in module.children():
             if hasattr(child, 'get_factors') and callable(child.get_factors):
                 self.decomposed_layers.append(child)

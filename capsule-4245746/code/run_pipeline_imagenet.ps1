@@ -67,13 +67,13 @@ Write-Host "Log file: $LOG"
 # ==============================================================================
 # Flags  (set to 1 to enable, 0 to skip a step)
 # ==============================================================================
-$RUN_TEACHER = 1
-$RUN_HINTS = 1
-$RUN_CLUSTERING = 1
+$RUN_TEACHER = 0
+$RUN_HINTS = 0
+$RUN_CLUSTERING = 0
 $RUN_TRAINING = 1
 $RUN_EVALUATION = 1
 
-$USE_NO_DALI = 1
+$USE_NO_DALI = 0
 
 # ==============================================================================
 # [1/5] Train Teacher
@@ -90,7 +90,7 @@ if ($RUN_TEACHER -eq 1) {
         --batch_size $BATCH `
         --learning_rate $LR `
         --weight_decay $WEIGHT_DECAY `
-        --lr_decay_epochs 30,60,90 `
+        --lr_decay_epochs 30, 60, 90 `
         --num_workers $NUM_WORKERS *>> $LOG
 
     if ($LASTEXITCODE -ne 0) {
@@ -98,7 +98,8 @@ if ($RUN_TEACHER -eq 1) {
         exit 1
     }
     "Teacher training complete." | Out-File -FilePath $LOG -Append
-} else {
+}
+else {
     Write-Host "[1/5] SKIPPED (RUN_TEACHER=0)"
 }
 
@@ -132,7 +133,8 @@ if ($RUN_HINTS -eq 1) {
         }
     }
     "Layer representation extraction complete." | Out-File -FilePath $LOG -Append
-} else {
+}
+else {
     Write-Host "[2/5] SKIPPED (RUN_HINTS=0)"
 }
 
@@ -165,7 +167,8 @@ if ($RUN_CLUSTERING -eq 1) {
     $HINT_POINTS = (Get-Content $CENTROID_FILE -Raw).Trim()
     Write-Host "PURSUhInT selected hint points: $HINT_POINTS"
     "PURSUhInT selected hint points: $HINT_POINTS" | Out-File -FilePath $LOG -Append
-} else {
+}
+else {
     Write-Host "[3/5] SKIPPED (RUN_CLUSTERING=0)"
     $HINT_POINTS = "8,11,12,16"
     Write-Host "Using default hint points: $HINT_POINTS"
@@ -215,7 +218,8 @@ if ($RUN_TRAINING -eq 1) {
     }
 
     "Student training complete." | Out-File -FilePath $LOG -Append
-} else {
+}
+else {
     Write-Host "[4/5] SKIPPED (RUN_TRAINING=0)"
 }
 
@@ -241,7 +245,8 @@ if ($RUN_EVALUATION -eq 1) {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARNING: Evaluation failed. Check $LOG." -ForegroundColor Yellow
     }
-} else {
+}
+else {
     Write-Host "[5/5] SKIPPED (RUN_EVALUATION=0)"
 }
 

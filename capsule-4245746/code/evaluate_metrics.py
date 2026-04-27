@@ -126,7 +126,7 @@ def evaluate_model(model, model_name, val_loader, criterion, opt, device):
     """Run full evaluation on a single model: accuracy + efficiency metrics."""
     
     # --- 1. Efficiency (on CPU, UNCOMPILED) ---
-    # We MUST run THOP on a clean, uncompiled CPU model, otherwise thop.profile will crash.    model_cpu = model.cpu()
+    # We MUST run THOP on a clean, uncompiled CPU model, otherwise thop.profile will crash.
     model_cpu = copy.deepcopy(model).cpu()
     model_cpu.eval()
     params, macs, latency = measure_model(model_cpu, dataset=opt.dataset, device='cpu')
