@@ -242,18 +242,27 @@ def main():
             print(f"==> Decomposing parallel student model using Tucker factorization (ratio: {opt.tucker_rank_ratio})...")
             model_s2 = decompose_model(model_s2, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio)
     
-    # ---- Compile models FIRST (Before threading!) ----
-    if opt.torch_compile:
-        model_s = torch.compile(model_s, dynamic=True)
-        model_t = torch.compile(model_t, dynamic=True)
-        if opt.dual_cmtf:
-            model_s2 = torch.compile(model_s2, dynamic=True)
-
-    # ---- Wrap in DataParallel SECOND ----
+    # ---- Wrap in DataParallel FIRST ----
     model_s = nn.DataParallel(model_s).cuda()
     model_t = nn.DataParallel(model_t).cuda()
     if opt.dual_cmtf:
         model_s2 = nn.DataParallel(model_s2).cuda()
+
+    # ---- Compile AFTER DataParallel ----
+    # torch.compile + nn.DataParallel is broken on multi-GPU: DataParallel.replicate()
+    # creates shallow copies of the OptimizedModule that lose the module tree, causing
+    # AttributeError on any attribute access during the compiled forward. Single-GPU
+    # DataParallel uses a fast path (no replicate) so compile works there.
+    if opt.torch_compile:
+        if torch.cuda.device_count() > 1:
+            print("Warning: --torch_compile is incompatible with nn.DataParallel on "
+                  f"{torch.cuda.device_count()} GPUs. Compilation skipped. "
+                  "Use DistributedDataParallel (torchrun) for multi-GPU + compile.")
+        else:
+            model_s = torch.compile(model_s, dynamic=True)
+            model_t = torch.compile(model_t, dynamic=True)
+            if opt.dual_cmtf:
+                model_s2 = torch.compile(model_s2, dynamic=True)
     
     if opt.path_s:
         try:
