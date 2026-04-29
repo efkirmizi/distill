@@ -52,6 +52,7 @@ from models.util import ConvReg
 from for_init import remove_module, add_module
 from decomposition import decompose_model
 
+from helper.uncertainty_weighter import DynamicLossWeighter
 from distiller_zoo.FitNet import HintLoss
 from distiller_zoo.KD import DistillKLD
 from distiller_zoo.AT import Attention
@@ -173,6 +174,11 @@ def parse():
 
     # PyTorch Compile Optimization
     parser.add_argument('--torch_compile', action='store_true')
+
+    # Dynamic loss weighting (Kendall et al. CVPR 2018)
+    parser.add_argument('--dynamic_loss_weights', action='store_true',
+                        help='Learn per-task loss weights via homoscedastic uncertainty '
+                             '(Kendall et al. CVPR 2018). Replaces fixed gamma/alpha/beta.')
 
     args = parser.parse_args()
 
@@ -519,14 +525,33 @@ def main():
     # Scale learning rate based on global batch size
     args.lr = args.lr * float(args.batch_size * args.world_size) / 256.
 
-    optimizer = torch.optim.SGD(trainable_list.parameters(), args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
+    # Dynamic loss weighters (Kendall et al. CVPR 2018).
+    # Created before optimizers so log_vars get a zero-weight-decay param group.
+    loss_weighter = None
+    loss_weighter_2 = None
+    if args.dynamic_loss_weights:
+        loss_weighter = DynamicLossWeighter(num_losses=3).cuda()
+        if args.dual_cmtf:
+            loss_weighter_2 = DynamicLossWeighter(num_losses=3).cuda()
 
-    if args.dual_cmtf:
-        optimizer_2 = torch.optim.SGD(trainable_list_2.parameters(), args.lr,
-                                      momentum=args.momentum,
-                                      weight_decay=args.weight_decay)
+    if args.dynamic_loss_weights:
+        optimizer = torch.optim.SGD([
+            {'params': trainable_list.parameters(), 'weight_decay': args.weight_decay},
+            {'params': loss_weighter.parameters(), 'weight_decay': 0.0},
+        ], args.lr, momentum=args.momentum)
+        if args.dual_cmtf:
+            optimizer_2 = torch.optim.SGD([
+                {'params': trainable_list_2.parameters(), 'weight_decay': args.weight_decay},
+                {'params': loss_weighter_2.parameters(), 'weight_decay': 0.0},
+            ], args.lr, momentum=args.momentum)
+    else:
+        optimizer = torch.optim.SGD(trainable_list.parameters(), args.lr,
+                                    momentum=args.momentum,
+                                    weight_decay=args.weight_decay)
+        if args.dual_cmtf:
+            optimizer_2 = torch.optim.SGD(trainable_list_2.parameters(), args.lr,
+                                          momentum=args.momentum,
+                                          weight_decay=args.weight_decay)
 
     # Append teacher AFTER optimizer creation (avoid weight decay on teacher)
     if teacher is not None:
@@ -589,10 +614,12 @@ def main():
                 best_acc1 = ckpt_cp.get('best_acc1', 0.0)
                 model_s.load_state_dict(ckpt_cp['state_dict'])
                 optimizer.load_state_dict(ckpt_cp['optimizer'])
+                if loss_weighter is not None and 'loss_weighter' in ckpt_cp:
+                    loss_weighter.load_state_dict(ckpt_cp['loss_weighter'])
                 print("=> loaded CP checkpoint (epoch {})".format(ckpt_cp['epoch']))
             else:
                 print("=> no CP checkpoint found at '{}'".format(cp_path))
-                
+
             # 2. Load Tucker Student
             if args.dual_cmtf:
                 if os.path.isfile(tk_path):
@@ -601,6 +628,8 @@ def main():
                     best_acc1_2 = ckpt_tk.get('best_acc1', 0.0)
                     model_s2.load_state_dict(ckpt_tk['state_dict'])
                     optimizer_2.load_state_dict(ckpt_tk['optimizer'])
+                    if loss_weighter_2 is not None and 'loss_weighter' in ckpt_tk:
+                        loss_weighter_2.load_state_dict(ckpt_tk['loss_weighter'])
                     print("=> loaded Tucker checkpoint (epoch {})".format(ckpt_tk['epoch']))
                 else:
                     print("=> no Tucker checkpoint found at '{}'".format(tk_path))
@@ -709,10 +738,12 @@ def main():
             if args.dual_cmtf:
                 avg_train_time, train_loss, train_p1, train_p5, train_loss_2, train_p1_2, train_p5_2 = train_kd(
                     train_loader, module_list, criterion_list, optimizer, epoch,
-                    module_list_2=module_list_2, criterion_list_2=criterion_list_2, optimizer_2=optimizer_2)
+                    module_list_2=module_list_2, criterion_list_2=criterion_list_2, optimizer_2=optimizer_2,
+                    loss_weighter=loss_weighter, loss_weighter_2=loss_weighter_2)
             else:
                 avg_train_time, train_loss, train_p1, train_p5 = train_kd(
-                    train_loader, module_list, criterion_list, optimizer, epoch)
+                    train_loader, module_list, criterion_list, optimizer, epoch,
+                    loss_weighter=loss_weighter)
         else:
             avg_train_time, train_loss, train_p1, train_p5 = train(
                 train_loader, model_s, criterion_cls, optimizer, epoch)
@@ -735,16 +766,22 @@ def main():
             is_best = acc1 > best_acc1
             best_acc1 = max(acc1, best_acc1)
 
-            save_checkpoint({
+            cp_ckpt = {
                 'epoch': epoch + 1,
                 'model_s': args.model_s,
                 'state_dict': model_s.state_dict(),
                 'best_acc1': best_acc1,
                 'optimizer': optimizer.state_dict(),
-            }, is_best, args.save_folder, tag='cp')
+            }
+            if loss_weighter is not None:
+                cp_ckpt['loss_weighter'] = loss_weighter.state_dict()
+            save_checkpoint(cp_ckpt, is_best, args.save_folder, tag='cp')
 
             print('CP  => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
                 acc1, acc5, best_acc1))
+            if loss_weighter is not None:
+                w = loss_weighter.effective_weights()
+                print('  [DynW CP]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*w))
 
             # ---- CSV row ----
             csv_writer_cp.writerow([
@@ -758,13 +795,19 @@ def main():
                 is_best_2 = acc1_2 > best_acc1_2
                 best_acc1_2 = max(acc1_2, best_acc1_2)
 
-                save_checkpoint({
+                tk_ckpt = {
                     'epoch': epoch + 1,
                     'model_s': args.model_s,
                     'state_dict': model_s2.state_dict(),
                     'best_acc1': best_acc1_2,
                     'optimizer': optimizer_2.state_dict(),
-                }, is_best_2, args.save_folder, tag='tucker')
+                }
+                if loss_weighter_2 is not None:
+                    tk_ckpt['loss_weighter'] = loss_weighter_2.state_dict()
+                save_checkpoint(tk_ckpt, is_best_2, args.save_folder, tag='tucker')
+                if loss_weighter_2 is not None:
+                    w2 = loss_weighter_2.effective_weights()
+                    print('  [DynW Tucker]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*w2))
 
                 print('Tucker => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
                     acc1_2, acc5_2, best_acc1_2))
@@ -818,9 +861,16 @@ def main():
     }
     if args.distill == 'pursuhint_cmtf':
         summary['cp_rank_ratio'] = args.cp_rank_ratio
+    if args.dynamic_loss_weights and loss_weighter is not None:
+        summary['dynamic_loss_weights'] = True
+        w = loss_weighter.effective_weights()
+        summary['final_weights_cp'] = {'cls': round(w[0], 6), 'div': round(w[1], 6), 'kd': round(w[2], 6)}
     if args.dual_cmtf:
         summary['tucker_rank_ratio'] = args.tucker_rank_ratio
         summary['best_acc1_tucker'] = round(best_acc1_2, 4)
+        if args.dynamic_loss_weights and loss_weighter_2 is not None:
+            w2 = loss_weighter_2.effective_weights()
+            summary['final_weights_tucker'] = {'cls': round(w2[0], 6), 'div': round(w2[1], 6), 'kd': round(w2[2], 6)}
     summary_path = os.path.join(args.save_folder, 'experiment_summary.json')
     with open(summary_path, 'w') as f:
         json.dump(summary, f, indent=4)
@@ -908,7 +958,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
 
 def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
-             module_list_2=None, criterion_list_2=None, optimizer_2=None):
+             module_list_2=None, criterion_list_2=None, optimizer_2=None,
+             loss_weighter=None, loss_weighter_2=None):
     """One epoch of knowledge distillation training (Unified Dual-Student)."""
     dual = module_list_2 is not None
 
@@ -957,7 +1008,10 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         elif args.distill == 'pursuhint_cmtf': loss_kd = criterion_kd(feat_s, feat_t)
         else: raise NotImplementedError(args.distill)
 
-        loss = args.gamma * loss_cls + args.alpha * loss_div + args.beta * loss_kd
+        if loss_weighter is not None:
+            loss = loss_weighter(loss_cls, loss_div, loss_kd)
+        else:
+            loss = args.gamma * loss_cls + args.alpha * loss_div + args.beta * loss_kd
 
         optimizer.zero_grad()
         if args.opt_level is not None:
@@ -974,7 +1028,10 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             
             # Tucker is currently only designed to be used with pursuhint_cmtf
             loss_kd_2 = criterion_kd_2(feat_s2, feat_t) 
-            loss_2 = args.gamma * loss_cls_2 + args.alpha * loss_div_2 + args.beta * loss_kd_2
+            if loss_weighter_2 is not None:
+                loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
+            else:
+                loss_2 = args.gamma * loss_cls_2 + args.alpha * loss_div_2 + args.beta * loss_kd_2
 
             optimizer_2.zero_grad()
             if args.opt_level is not None:

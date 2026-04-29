@@ -41,6 +41,7 @@ from crd.criterion import CRDLoss
 from helper.loops import train_distill as train, validate
 from helper.pretrain import init
 from helper.util import adjust_learning_rate_with_warmup
+from helper.uncertainty_weighter import DynamicLossWeighter
 
 from for_init import remove_module, add_module
 
@@ -117,6 +118,11 @@ def parse_option():
 
     # PyTorch model compile optimization
     parser.add_argument('--torch_compile', action='store_true')
+
+    # Dynamic loss weighting (Kendall et al. CVPR 2018)
+    parser.add_argument('--dynamic_loss_weights', action='store_true',
+                        help='Learn per-task loss weights via homoscedastic uncertainty '
+                             '(Kendall et al. CVPR 2018). Replaces fixed gamma/alpha/beta.')
 
     opt = parser.parse_args()
 
@@ -414,21 +420,40 @@ def main():
         criterion_list_2.append(criterion_cls)
         criterion_list_2.append(criterion_div)
         criterion_list_2.append(criterion_kd_2) # CMTF loss for Tucker model
-    
+
     if opt.distill == 'ATT_crd':
         criterion_list.append(criterion_kd1) #In this case, criterion_list consists of 4 components.
 
-    # optimizer
-    optimizer = optim.SGD(trainable_list.parameters(),
-                          lr=opt.learning_rate,
-                          momentum=opt.momentum,
-                          weight_decay=opt.weight_decay)
+    # Dynamic loss weighters (Kendall et al. CVPR 2018)
+    # log_vars use a separate param group with weight_decay=0 to avoid biasing toward equal weights.
+    loss_weighter = None
+    loss_weighter_2 = None
+    if opt.dynamic_loss_weights:
+        loss_weighter = DynamicLossWeighter(num_losses=3)
+        if opt.dual_cmtf:
+            loss_weighter_2 = DynamicLossWeighter(num_losses=3)
 
-    if opt.dual_cmtf:
-        optimizer_2 = optim.SGD(trainable_list_2.parameters(),
-                            lr=opt.learning_rate,
-                            momentum=opt.momentum,
-                            weight_decay=opt.weight_decay)
+    # optimizer
+    if opt.dynamic_loss_weights:
+        optimizer = optim.SGD([
+            {'params': trainable_list.parameters(), 'weight_decay': opt.weight_decay},
+            {'params': loss_weighter.parameters(), 'weight_decay': 0.0},
+        ], lr=opt.learning_rate, momentum=opt.momentum)
+        if opt.dual_cmtf:
+            optimizer_2 = optim.SGD([
+                {'params': trainable_list_2.parameters(), 'weight_decay': opt.weight_decay},
+                {'params': loss_weighter_2.parameters(), 'weight_decay': 0.0},
+            ], lr=opt.learning_rate, momentum=opt.momentum)
+    else:
+        optimizer = optim.SGD(trainable_list.parameters(),
+                              lr=opt.learning_rate,
+                              momentum=opt.momentum,
+                              weight_decay=opt.weight_decay)
+        if opt.dual_cmtf:
+            optimizer_2 = optim.SGD(trainable_list_2.parameters(),
+                                lr=opt.learning_rate,
+                                momentum=opt.momentum,
+                                weight_decay=opt.weight_decay)
 
     # append teacher after optimizer to avoid weight_decay
     module_list.append(model_t)
@@ -441,6 +466,10 @@ def main():
         if opt.dual_cmtf:
             module_list_2 = module_list_2.cuda()
             criterion_list_2.cuda()
+        if loss_weighter is not None:
+            loss_weighter = loss_weighter.cuda()
+        if loss_weighter_2 is not None:
+            loss_weighter_2 = loss_weighter_2.cuda()
         cudnn.benchmark = False
         cudnn.deterministic = True
 
@@ -541,11 +570,13 @@ def main():
                 epoch, train_loader, module_list, criterion_list, optimizer, opt,
                 scaler=scaler, teacher_cache=teacher_cache,
                 module_list_2=module_list_2, criterion_list_2=criterion_list_2,
-                optimizer_2=optimizer_2, scaler_2=scaler_2)
+                optimizer_2=optimizer_2, scaler_2=scaler_2,
+                loss_weighter=loss_weighter, loss_weighter_2=loss_weighter_2)
         else:
             train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(
                 epoch, train_loader, module_list, criterion_list, optimizer, opt,
-                scaler=scaler, teacher_cache=teacher_cache)
+                scaler=scaler, teacher_cache=teacher_cache,
+                loss_weighter=loss_weighter)
         time2 = time.time()
         epoch_time = time2 - time1
 
@@ -585,11 +616,24 @@ def main():
         print('test_acc CP:', test_acc)
         print('test_loss CP:', test_loss)
         print('test_acc_top5 CP:', test_acc_top5)
-        
+
+        if loss_weighter is not None:
+            w = loss_weighter.effective_weights()
+            print(f'  [DynW CP]  cls={w[0]:.4f}  div={w[1]:.4f}  kd={w[2]:.4f}')
+            logger.log_value('dyn_w_cls_cp', w[0], epoch)
+            logger.log_value('dyn_w_div_cp', w[1], epoch)
+            logger.log_value('dyn_w_kd_cp',  w[2], epoch)
+
         if opt.dual_cmtf:
             print('test_acc Tucker:', test_acc_2)
             print('test_loss Tucker:', test_loss_2)
             print('test_acc_top5 Tucker:', test_acc_top5_2)
+            if loss_weighter_2 is not None:
+                w2 = loss_weighter_2.effective_weights()
+                print(f'  [DynW Tucker]  cls={w2[0]:.4f}  div={w2[1]:.4f}  kd={w2[2]:.4f}')
+                logger.log_value('dyn_w_cls_tucker', w2[0], epoch)
+                logger.log_value('dyn_w_div_tucker', w2[1], epoch)
+                logger.log_value('dyn_w_kd_tucker',  w2[2], epoch)
 
         # --- CSV: write CP epoch row ---
         current_lr = optimizer.param_groups[0]['lr']
@@ -669,9 +713,22 @@ def main():
         'cp_rank_ratio': opt.cp_rank_ratio,
         'best_acc_cp': _f2(best_acc),
     }
+    if opt.dynamic_loss_weights and loss_weighter is not None:
+        summary['dynamic_loss_weights'] = True
+        summary['final_weights_cp'] = {
+            'cls': round(loss_weighter.effective_weights()[0], 6),
+            'div': round(loss_weighter.effective_weights()[1], 6),
+            'kd':  round(loss_weighter.effective_weights()[2], 6),
+        }
     if opt.dual_cmtf:
         summary['tucker_rank_ratio'] = opt.tucker_rank_ratio
         summary['best_acc_tucker'] = _f2(best_acc_2)
+        if opt.dynamic_loss_weights and loss_weighter_2 is not None:
+            summary['final_weights_tucker'] = {
+                'cls': round(loss_weighter_2.effective_weights()[0], 6),
+                'div': round(loss_weighter_2.effective_weights()[1], 6),
+                'kd':  round(loss_weighter_2.effective_weights()[2], 6),
+            }
     summary_path = os.path.join(opt.save_folder, 'experiment_summary.json')
     with open(summary_path, 'w') as f:
         json.dump(summary, f, indent=4)

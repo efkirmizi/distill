@@ -52,6 +52,14 @@ else
     TORCH_COMPILE=""
 fi
 
+# Dynamic loss weighting (Kendall et al. CVPR 2018) ON/OFF
+ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+if [ "$ENABLE_DYNAMIC_LOSS_WEIGHTS" -eq 1 ]; then
+    DYNAMIC_LOSS_WEIGHTS="--dynamic_loss_weights"
+else
+    DYNAMIC_LOSS_WEIGHTS=""
+fi
+
 # Log file
 LOG_DIR="./save/logs"
 LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_pipeline.log"
@@ -174,7 +182,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --num_workers ${NUM_WORKERS} \
         --hint_points "${HINT_POINTS}" \
         -r ${GAMMA} -a ${ALPHA} -b ${BETA} \
-        ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
+        ${TORCH_COMPILE} ${DYNAMIC_LOSS_WEIGHTS} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"
 else

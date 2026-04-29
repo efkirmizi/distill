@@ -75,6 +75,9 @@ $RUN_EVALUATION = 1
 
 $USE_NO_DALI = 0
 
+# Dynamic loss weighting (Kendall et al. CVPR 2018) ON/OFF
+$ENABLE_DYNAMIC_LOSS_WEIGHTS = 1
+
 # ==============================================================================
 # [1/5] Train Teacher
 # ==============================================================================
@@ -207,7 +210,12 @@ if ($RUN_TRAINING -eq 1) {
         $TRAIN_ARGS += "--no_dali"
         Write-Host "  Using standard PyTorch DataLoader (no DALI)"
     }
-    
+
+    if ($ENABLE_DYNAMIC_LOSS_WEIGHTS -eq 1) {
+        $TRAIN_ARGS += "--dynamic_loss_weights"
+        Write-Host "  Dynamic loss weighting enabled (Kendall et al.)"
+    }
+
     $TRAIN_ARGS += $IMAGENET_DIR
 
     & $PYTHON $TRAIN_ARGS *>> $LOG

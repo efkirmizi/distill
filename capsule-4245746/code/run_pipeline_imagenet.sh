@@ -65,6 +65,14 @@ RUN_EVALUATION=1
 # Use standard DataLoader instead of DALI? (set to 1 for local debugging)
 USE_NO_DALI=0
 
+# Dynamic loss weighting (Kendall et al. CVPR 2018) ON/OFF
+ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+if [ "$ENABLE_DYNAMIC_LOSS_WEIGHTS" -eq 1 ]; then
+    DYNAMIC_LOSS_WEIGHTS="--dynamic_loss_weights"
+else
+    DYNAMIC_LOSS_WEIGHTS=""
+fi
+
 # ==============================================================================
 # [1/5] Train Teacher
 # ==============================================================================
@@ -183,6 +191,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --alpha ${ALPHA} \
         --beta ${BETA} \
         ${DALI_FLAG} \
+        ${DYNAMIC_LOSS_WEIGHTS} \
         "${IMAGENET_DIR}" >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"

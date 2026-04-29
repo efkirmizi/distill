@@ -92,7 +92,8 @@ def train_vanilla(epoch, train_loader, model, criterion, optimizer, opt, scaler=
 
 def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, opt,
                   scaler=None, teacher_cache=None,
-                  module_list_2=None, criterion_list_2=None, optimizer_2=None, scaler_2=None):
+                  module_list_2=None, criterion_list_2=None, optimizer_2=None, scaler_2=None,
+                  loss_weighter=None, loss_weighter_2=None):
     """One epoch distillation. Pass module_list_2 and friends for per-batch dual-student training."""
     dual = module_list_2 is not None
 
@@ -239,7 +240,10 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             else:
                 raise NotImplementedError(opt.distill)
 
-            loss = opt.gamma * loss_cls + opt.alpha * loss_div + opt.beta * loss_kd
+            if loss_weighter is not None:
+                loss = loss_weighter(loss_cls, loss_div, loss_kd)
+            else:
+                loss = opt.gamma * loss_cls + opt.alpha * loss_div + opt.beta * loss_kd
 
         acc1, acc5 = accuracy(logit_s, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
@@ -274,7 +278,10 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                         [f.float() for f in feat_s2],
                         [f.float() for f in feat_t]
                     )
-                loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
+                if loss_weighter_2 is not None:
+                    loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
+                else:
+                    loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
 
             acc1_2, acc5_2 = accuracy(logit_s2, target, topk=(1, 5))
             losses_2.update(loss_2.item(), input.size(0))
