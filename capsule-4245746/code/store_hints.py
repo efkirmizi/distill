@@ -8,6 +8,7 @@ import torchvision.transforms as transforms
 import torchvision
 import torch
 import os
+import sys
 import argparse
 import numpy as np
 
@@ -107,8 +108,9 @@ def main():
     else:
         trainset = torchvision.datasets.CIFAR100(root=opt.data_folder, train=True, download=True, transform=transform)
 
-    # Use shuffle=False so indices are deterministic; num_workers=0 for Windows compatibility
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=False, num_workers=0)
+    # Use shuffle=False so indices are deterministic; num_workers=0 on Windows (no fork)
+    hint_workers = 0 if sys.platform == 'win32' else 4
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=False, num_workers=hint_workers)
 
     # Load teacher
     t_net = load_teacher(opt.t_path, n_cls, opt.model_t)

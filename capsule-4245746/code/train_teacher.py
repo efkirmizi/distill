@@ -127,7 +127,7 @@ def main():
 
     # tensorboard
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
-    scaler = torch.amp.GradScaler('cuda')
+    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
 
     # --- CSV Logger Setup ---
     csv_path = os.path.join(opt.save_folder, 'training_log.csv')

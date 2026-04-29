@@ -116,8 +116,9 @@ def decompose_model(model, method='cp', cp_rank_ratio=0.5, tucker_rank_ratio=0.5
         if len(list(module.children())) > 0:
             decompose_model(module, method, cp_rank_ratio, tucker_rank_ratio)
         elif isinstance(module, nn.Conv2d):
-            # Skip 1x1 convolutions as decomposing them actually increases parameter count
-            if module.kernel_size == (1, 1) or module.kernel_size == 1:
+            # Skip 1x1 convolutions (decomposing increases param count) and
+            # grouped/depthwise convolutions (CP/Tucker factorization is undefined for groups>1)
+            if module.kernel_size == (1, 1) or module.kernel_size == 1 or module.groups > 1:
                 continue
                 
             out_channels, in_channels, k_h, k_w = module.weight.shape

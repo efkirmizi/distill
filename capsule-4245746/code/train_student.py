@@ -526,20 +526,21 @@ def main():
         print('hint positions: ', opt.hint_points)
 
         time1 = time.time()
-        train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=scaler, teacher_cache=teacher_cache)
-        time2 = time.time()
-        epoch_time_cp = time2 - time1
-        
         if opt.dual_cmtf:
-            time1 = time.time()
-            train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2 = train(epoch, train_loader, module_list_2, criterion_list_2, optimizer_2, opt, scaler=scaler_2, teacher_cache=teacher_cache)
-            time2 = time.time()
-            epoch_time_tucker = time2 - time1
-
-        if opt.dual_cmtf:
-            print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time_cp + epoch_time_tucker))
+            (train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd,
+             train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2) = train(
+                epoch, train_loader, module_list, criterion_list, optimizer, opt,
+                scaler=scaler, teacher_cache=teacher_cache,
+                module_list_2=module_list_2, criterion_list_2=criterion_list_2,
+                optimizer_2=optimizer_2, scaler_2=scaler_2)
         else:
-            print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time_cp))
+            train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(
+                epoch, train_loader, module_list, criterion_list, optimizer, opt,
+                scaler=scaler, teacher_cache=teacher_cache)
+        time2 = time.time()
+        epoch_time = time2 - time1
+
+        print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time))
 
         print('train_acc CP:', train_acc)
         print('train_loss CP:', train_loss)
@@ -585,7 +586,7 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         def _f(v):
             return v.item() if hasattr(v, 'item') else float(v)
-        csv_writer_cp.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time_cp:.2f}',
+        csv_writer_cp.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
                                 f'{_f(train_acc):.4f}', f'{_f(train_acc_top5):.4f}',
                                 f'{_f(train_loss):.4f}', f'{_f(train_loss_cls):.4f}', 
                                 f'{_f(train_loss_div):.4f}', f'{_f(train_loss_kd):.4f}',
@@ -594,7 +595,7 @@ def main():
         csv_file_cp.flush()
 
         if opt.dual_cmtf:
-            csv_writer_tk.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time_tucker:.2f}',
+            csv_writer_tk.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
                                    f'{_f(train_acc_2):.4f}', f'{_f(train_acc_top5_2):.4f}', 
                                    f'{_f(train_loss_2):.4f}', f'{_f(train_loss_cls_2):.4f}', 
                                    f'{_f(train_loss_div_2):.4f}', f'{_f(train_loss_kd_2):.4f}',

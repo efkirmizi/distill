@@ -28,11 +28,7 @@ class CIFAR10Instance(datasets.CIFAR10):
     """CIFAR10Instance Dataset.
     """
     def __getitem__(self, index):
-        if self.train:
-            img, target = self.data[index], self.targets[index]
-        else:
-            img, target = self.data[index], self.targets[index]
-
+        img, target = self.data[index], self.targets[index]
         img = Image.fromarray(img)
 
         if self.transform is not None:
@@ -76,19 +72,20 @@ def get_cifar10_dataloaders(batch_size=128, num_workers=8, is_instance=False):
                               shuffle=True,
                               num_workers=num_workers,
                               pin_memory=True,
-                              persistent_workers=True,
+                              persistent_workers=num_workers > 0,
                               drop_last=True)
 
     test_set = datasets.CIFAR10(root=data_folder,
                                  download=True,
                                  train=False,
                                  transform=test_transform)
+    test_workers = int(num_workers / 2)
     test_loader = DataLoader(test_set,
                              batch_size=int(batch_size/2),
                              shuffle=False,
-                             num_workers=int(num_workers/2),
+                             num_workers=test_workers,
                              pin_memory=True,
-                             persistent_workers=True,
+                             persistent_workers=test_workers > 0,
                              drop_last=False)
 
     if is_instance:
@@ -195,19 +192,20 @@ def get_cifar10_dataloaders_sample(batch_size=128, num_workers=8, k=4096, mode='
                               shuffle=True,
                               num_workers=num_workers,
                               pin_memory=True,
-                              persistent_workers=True,
+                              persistent_workers=num_workers > 0,
                               drop_last=True)
 
     test_set = datasets.CIFAR10(root=data_folder,
                                  download=True,
                                  train=False,
                                  transform=test_transform)
+    test_workers = int(num_workers / 2)
     test_loader = DataLoader(test_set,
                              batch_size=int(batch_size/2),
                              shuffle=False,
-                             num_workers=int(num_workers/2),
+                             num_workers=test_workers,
                              pin_memory=True,
-                             persistent_workers=True,
+                             persistent_workers=test_workers > 0,
                              drop_last=False)
 
     return train_loader, test_loader, n_data

@@ -27,7 +27,7 @@ Write-Host "====================================================================
 # ==============================================================================
 # Note: On Windows, the command is usually 'python' instead of 'python3'
 $PYTHON = "python" 
-$DATASET = "imagenet_tiny"
+$DATASET = "imagenet100"
 $MODEL_T = "ResNet34"
 $MODEL_S = "ResNet18"
 $TRIAL = "1"
@@ -90,7 +90,7 @@ if ($RUN_TEACHER -eq 1) {
         --batch_size $BATCH `
         --learning_rate $LR `
         --weight_decay $WEIGHT_DECAY `
-        --lr_decay_epochs 30, 60, 90 `
+        --lr_decay_epochs "30,60,90" `
         --num_workers $NUM_WORKERS *>> $LOG
 
     if ($LASTEXITCODE -ne 0) {
@@ -233,7 +233,7 @@ if ($RUN_EVALUATION -eq 1) {
     $STUDENT_DIR = ".\save\student_model\imagenet100\${HINT_POINTS}\S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_cmtf_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
 
     & $PYTHON evaluate_metrics.py `
-        --dataset "imagenet100" `
+        --dataset $DATASET `
         --model_t $MODEL_T `
         --path_t $TEACHER_PATH `
         --model_s $MODEL_S `

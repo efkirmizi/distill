@@ -90,23 +90,39 @@ def train_vanilla(epoch, train_loader, model, criterion, optimizer, opt, scaler=
     return top1.avg, top5.avg, losses.avg
 
 
-def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, opt, scaler=None, teacher_cache=None):
-    """One epoch distillation"""
+def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, opt,
+                  scaler=None, teacher_cache=None,
+                  module_list_2=None, criterion_list_2=None, optimizer_2=None, scaler_2=None):
+    """One epoch distillation. Pass module_list_2 and friends for per-batch dual-student training."""
+    dual = module_list_2 is not None
+
     # set modules as train()
     for module in module_list:
         module.train()
     # set teacher as eval()
     module_list[-1].eval()
 
+    if dual:
+        for module in module_list_2:
+            module.train()
+        module_list_2[-1].eval()
 
     criterion_cls = criterion_list[0]
     criterion_div = criterion_list[1]
     criterion_kd = criterion_list[2]
     if opt.distill == 'ATT_crd':
-        criterion_kd1 = criterion_list[3] #crd loss
+        criterion_kd1 = criterion_list[3]
+
+    if dual:
+        criterion_cls_2 = criterion_list_2[0]
+        criterion_div_2 = criterion_list_2[1]
+        criterion_kd_2 = criterion_list_2[2]
 
     model_s = module_list[0]
     model_t = module_list[-1]
+
+    if dual:
+        model_s2 = module_list_2[0]
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -116,6 +132,14 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
     losses_kd = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
+
+    if dual:
+        losses_2 = AverageMeter()
+        losses_cls_2 = AverageMeter()
+        losses_div_2 = AverageMeter()
+        losses_kd_2 = AverageMeter()
+        top1_2 = AverageMeter()
+        top5_2 = AverageMeter()
 
     end = time.time()
     for idx, data in enumerate(train_loader):
@@ -133,9 +157,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             if opt.distill in ['crd'] or opt.distill == 'WSL_crd'  or opt.distill == 'ATT_crd':
                 contrast_idx = contrast_idx.cuda()
 
-
-
-        # ===================forward=====================
+        # ===================forward CP student=====================
         preact = False
         with torch.amp.autocast('cuda', enabled=scaler is not None):
             feat_s, logit_s = model_s(input, is_feat=True, preact=preact)
@@ -153,7 +175,6 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                 with torch.no_grad():
                     feat_t, logit_t = model_t(input, is_feat=True, preact=preact)
                     feat_t = [feat_t[int(i)] for i in opt.hint_points.split(',')]
-            
                     feat_t = [f.detach() for f in feat_t]
 
             # cls + kl div
@@ -166,7 +187,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
 
             # other kd beyond KL divergence
             if opt.distill == 'kd':
-                loss_kd = torch.tensor(0.0).cuda()
+                loss_kd = torch.tensor(0.0, device=input.device)
             elif opt.distill == 'hint':
                 f_s = [module_list[1+i](feat_s[i]) for i in range(len(feat_s))]
                 f_t = feat_t
@@ -181,18 +202,14 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                 loss_group = criterion_kd(g_s, g_t)
                 loss_kd = sum(loss_group)
             elif opt.distill == 'ATT_crd':
-                #first loss for ATT (criterion_kd), second for crd (criterion_kd1)
-                # 4+1(CRD) points should be chosen for s_points for ATT+CRD experiments:
-
                 f_s = feat_s[-1]
                 f_t = feat_t[-1]
-                loss_kd_crd = criterion_kd1(f_s, f_t, index, contrast_idx) # for CRD
+                loss_kd_crd = criterion_kd1(f_s, f_t, index, contrast_idx)
 
-                g_s = feat_s[:-1] #last HP for CRD
+                g_s = feat_s[:-1]
                 g_t = feat_t[:-1]
-                loss_group = criterion_kd(g_s, g_t) # for ATT
+                loss_group = criterion_kd(g_s, g_t)
                 loss_kd_att = sum(loss_group)
-
 
                 loss_kd = loss_kd_crd + loss_kd_att * opt.beta2
 
@@ -200,13 +217,11 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                 g_s = feat_s
                 g_t = feat_t
                 loss_group = criterion_kd(g_s, g_t)
-                loss_kd = sum(loss_group)       
+                loss_kd = sum(loss_group)
             elif opt.distill == 'WSL_crd':
                 f_s = feat_s[-1]
                 f_t = feat_t[-1]
                 loss_kd = criterion_kd(f_s, f_t, index, contrast_idx)
-
-                    
             elif opt.distill == 'vid':
                 g_s = feat_s
                 g_t = feat_t
@@ -226,17 +241,15 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
 
             loss = opt.gamma * loss_cls + opt.alpha * loss_div + opt.beta * loss_kd
 
-
         acc1, acc5 = accuracy(logit_s, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
         losses_cls.update(loss_cls.item(), input.size(0))
         losses_div.update(loss_div.item(), input.size(0))
         losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else loss_kd, input.size(0))
-        
         top1.update(acc1[0], input.size(0))
         top5.update(acc5[0], input.size(0))
 
-        # ===================backward=====================
+        # ===================backward CP=====================
         optimizer.zero_grad()
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -245,6 +258,40 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         else:
             loss.backward()
             optimizer.step()
+
+        # ===================forward+backward Tucker student (dual mode)=====================
+        if dual:
+            with torch.amp.autocast('cuda', enabled=scaler_2 is not None):
+                feat_s2, logit_s2 = model_s2(input, is_feat=True, preact=preact)
+                feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
+
+                loss_cls_2 = criterion_cls_2(logit_s2, target)
+                loss_div_2 = criterion_div_2(logit_s2, logit_t)
+
+                # Disable autocast for CMTF: parafac() uses FP64 ALS internally
+                with torch.amp.autocast('cuda', enabled=False):
+                    loss_kd_2 = criterion_kd_2(
+                        [f.float() for f in feat_s2],
+                        [f.float() for f in feat_t]
+                    )
+                loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
+
+            acc1_2, acc5_2 = accuracy(logit_s2, target, topk=(1, 5))
+            losses_2.update(loss_2.item(), input.size(0))
+            losses_cls_2.update(loss_cls_2.item(), input.size(0))
+            losses_div_2.update(loss_div_2.item(), input.size(0))
+            losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else loss_kd_2, input.size(0))
+            top1_2.update(acc1_2[0], input.size(0))
+            top5_2.update(acc5_2[0], input.size(0))
+
+            optimizer_2.zero_grad()
+            if scaler_2 is not None:
+                scaler_2.scale(loss_2).backward()
+                scaler_2.step(optimizer_2)
+                scaler_2.update()
+            else:
+                loss_2.backward()
+                optimizer_2.step()
 
         # ===================meters=====================
         batch_time.update(time.time() - end)
@@ -265,6 +312,9 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
     print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
           .format(top1=top1, top5=top5))
 
+    if dual:
+        return (top1.avg, top5.avg, losses.avg, losses_cls.avg, losses_div.avg, losses_kd.avg,
+                top1_2.avg, top5_2.avg, losses_2.avg, losses_cls_2.avg, losses_div_2.avg, losses_kd_2.avg)
     return top1.avg, top5.avg, losses.avg, losses_cls.avg, losses_div.avg, losses_kd.avg
 
 

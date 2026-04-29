@@ -500,9 +500,9 @@ def main():
             criterion_kd = Attention()
 
         elif args.distill == 'pursuhint_cmtf':
-            criterion_kd = CoupledTensorLoss(rank=args.cmtf_rank, iter_max=10)
+            criterion_kd = CoupledTensorLoss(model=model_s, rank=args.cmtf_rank, iter_max=10)
             if args.dual_cmtf:
-                criterion_kd_2 = CoupledTensorLoss(rank=args.cmtf_rank, iter_max=10)
+                criterion_kd_2 = CoupledTensorLoss(model=model_s2, rank=args.cmtf_rank, iter_max=10)
 
         else:
             raise NotImplementedError(args.distill)
@@ -948,7 +948,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         loss_cls = criterion_cls(logit_s, target)
         loss_div = criterion_div(logit_s, logit_t, target) if args.distill == 'WSL_att' else criterion_div(logit_s, logit_t)
 
-        if args.distill == 'kd': loss_kd = torch.tensor(0.0).cuda()
+        if args.distill == 'kd': loss_kd = torch.tensor(0.0, device=inp.device)
         elif args.distill == 'hint':
             f_s = [module_list[1 + j](feat_s[j]) for j in range(len(feat_s))]
             loss_kd = criterion_kd(f_s, feat_t)

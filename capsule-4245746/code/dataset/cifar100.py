@@ -88,19 +88,20 @@ def get_cifar100_dataloaders(batch_size=128, num_workers=8, is_instance=False):
                               shuffle=True,
                               num_workers=num_workers,
                               pin_memory=True,
-                              persistent_workers=True,
+                              persistent_workers=num_workers > 0,
                               drop_last=True)
 
     test_set = datasets.CIFAR100(root=data_folder,
                                  download=True,
                                  train=False,
                                  transform=test_transform)
+    test_workers = int(num_workers / 2)
     test_loader = DataLoader(test_set,
                              batch_size=int(batch_size/2),
                              shuffle=False,
-                             num_workers=int(num_workers/2),
+                             num_workers=test_workers,
                              pin_memory=True,
-                             persistent_workers=True,
+                             persistent_workers=test_workers > 0,
                              drop_last=False)
 
     if is_instance:
@@ -211,19 +212,20 @@ def get_cifar100_dataloaders_sample(batch_size=128, num_workers=8, k=4096, mode=
                               shuffle=True,
                               num_workers=num_workers,
                               pin_memory=True,
-                              persistent_workers=True,
+                              persistent_workers=num_workers > 0,
                               drop_last=True)
 
     test_set = datasets.CIFAR100(root=data_folder,
                                  download=True,
                                  train=False,
                                  transform=test_transform)
+    test_workers = int(num_workers / 2)
     test_loader = DataLoader(test_set,
                              batch_size=int(batch_size/2),
                              shuffle=False,
-                             num_workers=int(num_workers/2),
+                             num_workers=test_workers,
                              pin_memory=True,
-                             persistent_workers=True,
+                             persistent_workers=test_workers > 0,
                              drop_last=False)
 
 

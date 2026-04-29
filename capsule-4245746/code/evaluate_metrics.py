@@ -257,7 +257,9 @@ def evaluate():
         print(f"  {r['model']}: {param_ratio:.2f}x param reduction, {flop_ratio:.2f}x FLOP reduction")
 
     # Save JSON
-    os.makedirs(os.path.dirname(opt.save_path), exist_ok=True)
+    save_dir = os.path.dirname(opt.save_path)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
     with open(opt.save_path, 'w') as f:
         json.dump(results, f, indent=4)
     print(f"\nResults saved to {opt.save_path}")
