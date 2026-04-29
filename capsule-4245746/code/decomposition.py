@@ -23,26 +23,28 @@ class CPConv2d(nn.Module):
         # Absorb the CP scaling weights (lambda) into the output factor
         f_out = f_out * cp_weights.unsqueeze(0)
 
+        dtype = weight.dtype
+
         # Layer 1: Pointwise convolution (in_channels -> rank)
         self.pointwise_in = nn.Conv2d(in_channels, rank, kernel_size=1, bias=False).to(self.device)
-        self.pointwise_in.weight.data = f_in.t().unsqueeze(2).unsqueeze(3).contiguous()
+        self.pointwise_in.weight.data = f_in.t().unsqueeze(2).unsqueeze(3).to(dtype=dtype).contiguous()
 
         # Layer 2: Depthwise convolution over height
         self.depthwise_h = nn.Conv2d(rank, rank, kernel_size=(kernel_height, 1),
                                      stride=(layer.stride[0], 1), padding=(layer.padding[0], 0),
                                      groups=rank, bias=False).to(self.device)
-        self.depthwise_h.weight.data = f_h.t().unsqueeze(1).unsqueeze(3).contiguous()
+        self.depthwise_h.weight.data = f_h.t().unsqueeze(1).unsqueeze(3).to(dtype=dtype).contiguous()
 
         # Layer 3: Depthwise convolution over width
         self.depthwise_w = nn.Conv2d(rank, rank, kernel_size=(1, kernel_width),
                                      stride=(1, layer.stride[1]), padding=(0, layer.padding[1]),
                                      groups=rank, bias=False).to(self.device)
-        self.depthwise_w.weight.data = f_w.t().unsqueeze(1).unsqueeze(2).contiguous()
+        self.depthwise_w.weight.data = f_w.t().unsqueeze(1).unsqueeze(2).to(dtype=dtype).contiguous()
 
         # Layer 4: Pointwise convolution (rank -> out_channels)
         self.pointwise_out = nn.Conv2d(rank, out_channels, kernel_size=1,
                                        bias=True if layer.bias is not None else False).to(self.device)
-        self.pointwise_out.weight.data = f_out.unsqueeze(2).unsqueeze(3).contiguous()
+        self.pointwise_out.weight.data = f_out.unsqueeze(2).unsqueeze(3).to(dtype=dtype).contiguous()
         
         if layer.bias is not None:
             self.pointwise_out.bias.data = layer.bias.data
@@ -72,13 +74,15 @@ class TuckerConv2d(nn.Module):
         out_channels, in_channels, kernel_height, kernel_width = weight.shape
         rank_out, rank_in = ranks
 
+        dtype = weight.dtype
+
         # Perform Tucker decomposition
         core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width], init='random', tol=10e-5)
         f_out, f_in, f_h, f_w = factors
 
         # Layer 1: Pointwise convolution (in_channels -> rank_in)
         self.pointwise_in = nn.Conv2d(in_channels, rank_in, kernel_size=1, bias=False).to(self.device)
-        self.pointwise_in.weight.data = f_in.t().unsqueeze(-1).unsqueeze(-1).contiguous()
+        self.pointwise_in.weight.data = f_in.t().unsqueeze(-1).unsqueeze(-1).to(dtype=dtype).contiguous()
 
         # Layer 2: Core convolution (rank_in -> rank_out)
         self.core_conv = nn.Conv2d(rank_in, rank_out, kernel_size=(kernel_height, kernel_width),
@@ -87,12 +91,12 @@ class TuckerConv2d(nn.Module):
         # Reconstruct spatial core
         core_spatial = tl.tenalg.mode_dot(core, f_h, mode=2)
         core_spatial = tl.tenalg.mode_dot(core_spatial, f_w, mode=3)
-        self.core_conv.weight.data = core_spatial.contiguous()
+        self.core_conv.weight.data = core_spatial.to(dtype=dtype).contiguous()
 
         # Layer 3: Pointwise convolution (rank_out -> out_channels)
         self.pointwise_out = nn.Conv2d(rank_out, out_channels, kernel_size=1,
                                        bias=True if layer.bias is not None else False).to(self.device)
-        self.pointwise_out.weight.data = f_out.unsqueeze(-1).unsqueeze(-1).contiguous()
+        self.pointwise_out.weight.data = f_out.unsqueeze(-1).unsqueeze(-1).to(dtype=dtype).contiguous()
         
         if layer.bias is not None:
             self.pointwise_out.bias.data = layer.bias.data
@@ -135,8 +139,10 @@ def decompose_model(model, method='cp', cp_rank_ratio=0.5, tucker_rank_ratio=0.5
                 new_module = CPConv2d(module, rank)
                 
             elif method == 'tucker':
-                rank_out = max(int(out_channels * tucker_rank_ratio), 1)
-                rank_in = max(int(in_channels * tucker_rank_ratio), 1)
+                # Floor at min(4, channels) so cuDNN never sees degenerate 1- or 2-channel
+                # intermediate tensors, which trigger alignment failures on some CUDA versions.
+                rank_out = max(int(out_channels * tucker_rank_ratio), min(4, out_channels))
+                rank_in = max(int(in_channels * tucker_rank_ratio), min(4, in_channels))
                 new_module = TuckerConv2d(module, [rank_out, rank_in])
                 
             else:
