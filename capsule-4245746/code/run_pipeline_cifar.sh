@@ -36,8 +36,8 @@ HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_last"
 
 # Student training loss weights (Optimized 65/15/20 Split)
 GAMMA=1.0
-ALPHA=2.0
-BETA=400.0
+ALPHA=4.0
+BETA=25.0
 
 # CP / Tucker Rank Ratios and CMTF Rank
 CP_RANK_RATIO=0.5
