@@ -25,24 +25,24 @@ class CPConv2d(nn.Module):
 
         # Layer 1: Pointwise convolution (in_channels -> rank)
         self.pointwise_in = nn.Conv2d(in_channels, rank, kernel_size=1, bias=False).to(self.device)
-        self.pointwise_in.weight.data = f_in.t().unsqueeze(2).unsqueeze(3)
+        self.pointwise_in.weight.data = f_in.t().unsqueeze(2).unsqueeze(3).contiguous()
 
         # Layer 2: Depthwise convolution over height
-        self.depthwise_h = nn.Conv2d(rank, rank, kernel_size=(kernel_height, 1), 
-                                     stride=(layer.stride[0], 1), padding=(layer.padding[0], 0), 
+        self.depthwise_h = nn.Conv2d(rank, rank, kernel_size=(kernel_height, 1),
+                                     stride=(layer.stride[0], 1), padding=(layer.padding[0], 0),
                                      groups=rank, bias=False).to(self.device)
-        self.depthwise_h.weight.data = f_h.t().unsqueeze(1).unsqueeze(3)
+        self.depthwise_h.weight.data = f_h.t().unsqueeze(1).unsqueeze(3).contiguous()
 
         # Layer 3: Depthwise convolution over width
-        self.depthwise_w = nn.Conv2d(rank, rank, kernel_size=(1, kernel_width), 
-                                     stride=(1, layer.stride[1]), padding=(0, layer.padding[1]), 
+        self.depthwise_w = nn.Conv2d(rank, rank, kernel_size=(1, kernel_width),
+                                     stride=(1, layer.stride[1]), padding=(0, layer.padding[1]),
                                      groups=rank, bias=False).to(self.device)
-        self.depthwise_w.weight.data = f_w.t().unsqueeze(1).unsqueeze(2)
+        self.depthwise_w.weight.data = f_w.t().unsqueeze(1).unsqueeze(2).contiguous()
 
         # Layer 4: Pointwise convolution (rank -> out_channels)
-        self.pointwise_out = nn.Conv2d(rank, out_channels, kernel_size=1, 
+        self.pointwise_out = nn.Conv2d(rank, out_channels, kernel_size=1,
                                        bias=True if layer.bias is not None else False).to(self.device)
-        self.pointwise_out.weight.data = f_out.unsqueeze(2).unsqueeze(3)
+        self.pointwise_out.weight.data = f_out.unsqueeze(2).unsqueeze(3).contiguous()
         
         if layer.bias is not None:
             self.pointwise_out.bias.data = layer.bias.data
@@ -78,21 +78,21 @@ class TuckerConv2d(nn.Module):
 
         # Layer 1: Pointwise convolution (in_channels -> rank_in)
         self.pointwise_in = nn.Conv2d(in_channels, rank_in, kernel_size=1, bias=False).to(self.device)
-        self.pointwise_in.weight.data = f_in.t().unsqueeze(-1).unsqueeze(-1)
+        self.pointwise_in.weight.data = f_in.t().unsqueeze(-1).unsqueeze(-1).contiguous()
 
         # Layer 2: Core convolution (rank_in -> rank_out)
         self.core_conv = nn.Conv2d(rank_in, rank_out, kernel_size=(kernel_height, kernel_width),
                                    stride=layer.stride, padding=layer.padding, bias=False).to(self.device)
-        
+
         # Reconstruct spatial core
-        core_spatial = tl.tenalg.mode_dot(core, f_h, mode=2) # Use mode_dot sequentially for safety across tensorly versions
+        core_spatial = tl.tenalg.mode_dot(core, f_h, mode=2)
         core_spatial = tl.tenalg.mode_dot(core_spatial, f_w, mode=3)
-        self.core_conv.weight.data = core_spatial
+        self.core_conv.weight.data = core_spatial.contiguous()
 
         # Layer 3: Pointwise convolution (rank_out -> out_channels)
-        self.pointwise_out = nn.Conv2d(rank_out, out_channels, kernel_size=1, 
+        self.pointwise_out = nn.Conv2d(rank_out, out_channels, kernel_size=1,
                                        bias=True if layer.bias is not None else False).to(self.device)
-        self.pointwise_out.weight.data = f_out.unsqueeze(-1).unsqueeze(-1)
+        self.pointwise_out.weight.data = f_out.unsqueeze(-1).unsqueeze(-1).contiguous()
         
         if layer.bias is not None:
             self.pointwise_out.bias.data = layer.bias.data

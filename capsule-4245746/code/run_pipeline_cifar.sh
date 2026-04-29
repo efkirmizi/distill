@@ -44,6 +44,14 @@ CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
 CMTF_RANK=8
 
+# PyTorch Compile Optimization ON/OFF
+ENABLE_TORCH_COMPILE=1
+if [ "$ENABLE_TORCH_COMPILE" -eq 1 ]; then
+    TORCH_COMPILE="--torch_compile"
+else
+    TORCH_COMPILE=""
+fi
+
 # Log file
 LOG_DIR="./save/logs"
 LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_pipeline.log"
@@ -74,7 +82,8 @@ if [ "$RUN_TEACHER" -eq 1 ]; then
         --lr_decay_epochs ${LR_DECAY_EPOCHS} \
         --batch_size ${BATCH} \
         --num_workers ${NUM_WORKERS} \
-        --trial ${TRIAL} >> "${LOG}" 2>&1 || { echo "ERROR: Teacher training failed. Check ${LOG}."; exit 1; }
+        --trial ${TRIAL} \
+        ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "ERROR: Teacher training failed. Check ${LOG}."; exit 1; }
 
     echo "Teacher training complete." >> "${LOG}"
 else
@@ -164,7 +173,8 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --batch_size ${BATCH} \
         --num_workers ${NUM_WORKERS} \
         --hint_points "${HINT_POINTS}" \
-        -r ${GAMMA} -a ${ALPHA} -b ${BETA} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
+        -r ${GAMMA} -a ${ALPHA} -b ${BETA} \
+        ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"
 else
@@ -189,7 +199,8 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --path_s_cp "${STUDENT_DIR}/${MODEL_S}_best_cp.pth" \
         --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_best_tucker.pth" \
         --cp_rank_ratio ${CP_RANK_RATIO} \
-        --tucker_rank_ratio ${TUCKER_RANK_RATIO} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
+        --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
+        ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
     echo "[5/5] SKIPPED (RUN_EVALUATION=0)"
 fi
