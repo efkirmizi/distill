@@ -538,21 +538,26 @@ def main():
     csv_path_cp = os.path.join(opt.save_folder, 'training_log_cp.csv')
     csv_file_cp = open(csv_path_cp, 'w', newline='')
     csv_writer_cp = csv.writer(csv_file_cp)
-    csv_writer_cp.writerow(['epoch', 'lr', 'epoch_time', 
-                            'train_acc', 'train_acc_top5', 'train_loss', 
+    csv_writer_cp.writerow(['epoch', 'lr', 'epoch_time',
+                            'train_acc', 'train_acc_top5', 'train_loss',
                             'train_loss_cls', 'train_loss_div', 'train_loss_kd',
-                            'test_acc', 'test_acc_top5', 'test_loss', 'best_acc'])
+                            'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
+                            'w_cls', 'w_div', 'w_kd'])
     print(f'CP CSV log: {csv_path_cp}')
 
     if opt.dual_cmtf:
         csv_path_tk = os.path.join(opt.save_folder, 'training_log_tucker.csv')
         csv_file_tk = open(csv_path_tk, 'w', newline='')
         csv_writer_tk = csv.writer(csv_file_tk)
-        csv_writer_tk.writerow(['epoch', 'lr', 'epoch_time', 
-                            'train_acc', 'train_acc_top5', 'train_loss', 
+        csv_writer_tk.writerow(['epoch', 'lr', 'epoch_time',
+                            'train_acc', 'train_acc_top5', 'train_loss',
                             'train_loss_cls', 'train_loss_div', 'train_loss_kd',
-                            'test_acc', 'test_acc_top5', 'test_loss', 'best_acc'])
+                            'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
+                            'w_cls', 'w_div', 'w_kd'])
         print(f'Tucker CSV log: {csv_path_tk}')
+
+    def _f(v):
+        return v.item() if hasattr(v, 'item') else float(v)
 
     for epoch in range(opt.start_epoch, opt.epochs + 1):
 
@@ -635,26 +640,7 @@ def main():
                 logger.log_value('dyn_w_div_tucker', w2[1], epoch)
                 logger.log_value('dyn_w_kd_tucker',  w2[2], epoch)
 
-        # --- CSV: write CP epoch row ---
         current_lr = optimizer.param_groups[0]['lr']
-        def _f(v):
-            return v.item() if hasattr(v, 'item') else float(v)
-        csv_writer_cp.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
-                                f'{_f(train_acc):.4f}', f'{_f(train_acc_top5):.4f}',
-                                f'{_f(train_loss):.4f}', f'{_f(train_loss_cls):.4f}', 
-                                f'{_f(train_loss_div):.4f}', f'{_f(train_loss_kd):.4f}',
-                                f'{_f(test_acc):.4f}', f'{_f(test_acc_top5):.4f}',
-                                f'{_f(test_loss):.4f}', f'{_f(best_acc):.4f}'])
-        csv_file_cp.flush()
-
-        if opt.dual_cmtf:
-            csv_writer_tk.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
-                                   f'{_f(train_acc_2):.4f}', f'{_f(train_acc_top5_2):.4f}', 
-                                   f'{_f(train_loss_2):.4f}', f'{_f(train_loss_cls_2):.4f}', 
-                                   f'{_f(train_loss_div_2):.4f}', f'{_f(train_loss_kd_2):.4f}',
-                                   f'{_f(test_acc_2):.4f}', f'{_f(test_acc_top5_2):.4f}',
-                                   f'{_f(test_loss_2):.4f}', f'{_f(best_acc_2):.4f}'])
-            csv_file_tk.flush()
 
         # save the best CP model
         if test_acc > best_acc:
@@ -681,6 +667,42 @@ def main():
                 print('saving the best Tucker model!')
                 torch.save(state2, save_file2)
 
+        # --- CSV: write epoch rows (after best_acc update so the column is accurate) ---
+        if loss_weighter is not None:
+            ew = loss_weighter.effective_weights()
+        else:
+            ew = [
+                opt.gamma if opt.gamma is not None else 1.0,
+                opt.alpha if opt.alpha is not None else 0.0,
+                opt.beta  if opt.beta  is not None else 0.0,
+            ]
+        csv_writer_cp.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
+                                f'{_f(train_acc):.4f}', f'{_f(train_acc_top5):.4f}',
+                                f'{_f(train_loss):.4f}', f'{_f(train_loss_cls):.4f}',
+                                f'{_f(train_loss_div):.4f}', f'{_f(train_loss_kd):.4f}',
+                                f'{_f(test_acc):.4f}', f'{_f(test_acc_top5):.4f}',
+                                f'{_f(test_loss):.4f}', f'{_f(best_acc):.4f}',
+                                f'{ew[0]:.6f}', f'{ew[1]:.6f}', f'{ew[2]:.6f}'])
+        csv_file_cp.flush()
+
+        if opt.dual_cmtf:
+            if loss_weighter_2 is not None:
+                ew2 = loss_weighter_2.effective_weights()
+            else:
+                ew2 = [
+                    opt.gamma if opt.gamma is not None else 1.0,
+                    opt.alpha if opt.alpha is not None else 0.0,
+                    opt.beta  if opt.beta  is not None else 0.0,
+                ]
+            csv_writer_tk.writerow([epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
+                                   f'{_f(train_acc_2):.4f}', f'{_f(train_acc_top5_2):.4f}',
+                                   f'{_f(train_loss_2):.4f}', f'{_f(train_loss_cls_2):.4f}',
+                                   f'{_f(train_loss_div_2):.4f}', f'{_f(train_loss_kd_2):.4f}',
+                                   f'{_f(test_acc_2):.4f}', f'{_f(test_acc_top5_2):.4f}',
+                                   f'{_f(test_loss_2):.4f}', f'{_f(best_acc_2):.4f}',
+                                   f'{ew2[0]:.6f}', f'{ew2[1]:.6f}', f'{ew2[2]:.6f}'])
+            csv_file_tk.flush()
+
     # --- Close CSVs ---
     csv_file_cp.close()
     print(f'CP training log saved to: {csv_path_cp}')
@@ -694,8 +716,6 @@ def main():
         print('best Tucker accuracy:', best_acc_2)
 
     # --- Save experiment summary JSON ---
-    def _f2(v):
-        return round(v.item() if hasattr(v, 'item') else float(v), 4)
     summary = {
         'teacher': opt.model_t,
         'student': opt.model_s,
@@ -711,7 +731,7 @@ def main():
         'alpha': opt.alpha,
         'beta': opt.beta,
         'cp_rank_ratio': opt.cp_rank_ratio,
-        'best_acc_cp': _f2(best_acc),
+        'best_acc_cp': round(_f(best_acc), 4),
     }
     if opt.dynamic_loss_weights and loss_weighter is not None:
         summary['dynamic_loss_weights'] = True
@@ -722,7 +742,7 @@ def main():
         }
     if opt.dual_cmtf:
         summary['tucker_rank_ratio'] = opt.tucker_rank_ratio
-        summary['best_acc_tucker'] = _f2(best_acc_2)
+        summary['best_acc_tucker'] = round(_f(best_acc_2), 4)
         if opt.dynamic_loss_weights and loss_weighter_2 is not None:
             summary['final_weights_tucker'] = {
                 'cls': round(loss_weighter_2.effective_weights()[0], 6),

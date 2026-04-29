@@ -716,7 +716,8 @@ def main():
     csv_writer_cp = csv.writer(csv_file_cp)
     if write_header_cp:
         csv_writer_cp.writerow(['epoch', 'lr', 'train_loss', 'train_acc1', 'train_acc5',
-                            'val_acc1', 'val_acc5', 'best_acc1'])
+                            'val_acc1', 'val_acc5', 'best_acc1',
+                            'w_cls', 'w_div', 'w_kd'])
     print(f'CSV log: {csv_path_cp}')
 
     if args.dual_cmtf:
@@ -726,7 +727,8 @@ def main():
         csv_writer_tk = csv.writer(csv_file_tk)
         if write_header_tk:
             csv_writer_tk.writerow(['epoch', 'lr', 'train_loss', 'train_acc1', 'train_acc5',
-                                    'val_acc1', 'val_acc5', 'best_acc1'])
+                                    'val_acc1', 'val_acc5', 'best_acc1',
+                                    'w_cls', 'w_div', 'w_kd'])
         print(f'Tucker CSV log: {csv_path_tk}')
 
     # ==================== Training Loop ====================
@@ -780,14 +782,17 @@ def main():
             print('CP  => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
                 acc1, acc5, best_acc1))
             if loss_weighter is not None:
-                w = loss_weighter.effective_weights()
-                print('  [DynW CP]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*w))
+                ew = loss_weighter.effective_weights()
+                print('  [DynW CP]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*ew))
+            else:
+                ew = [args.gamma, args.alpha, args.beta]
 
             # ---- CSV row ----
             csv_writer_cp.writerow([
                 epoch, f'{current_lr:.6f}',
                 f'{train_loss:.4f}', f'{train_p1:.3f}', f'{train_p5:.3f}',
-                f'{acc1:.3f}', f'{acc5:.3f}', f'{best_acc1:.3f}'])
+                f'{acc1:.3f}', f'{acc5:.3f}', f'{best_acc1:.3f}',
+                f'{ew[0]:.6f}', f'{ew[1]:.6f}', f'{ew[2]:.6f}'])
             csv_file_cp.flush()
 
             # Tucker / secondary student
@@ -806,8 +811,10 @@ def main():
                     tk_ckpt['loss_weighter'] = loss_weighter_2.state_dict()
                 save_checkpoint(tk_ckpt, is_best_2, args.save_folder, tag='tucker')
                 if loss_weighter_2 is not None:
-                    w2 = loss_weighter_2.effective_weights()
-                    print('  [DynW Tucker]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*w2))
+                    ew2 = loss_weighter_2.effective_weights()
+                    print('  [DynW Tucker]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*ew2))
+                else:
+                    ew2 = [args.gamma, args.alpha, args.beta]
 
                 print('Tucker => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
                     acc1_2, acc5_2, best_acc1_2))
@@ -815,7 +822,8 @@ def main():
                 csv_writer_tk.writerow([
                     epoch, f'{current_lr:.6f}',
                     f'{train_loss_2:.4f}', f'{train_p1_2:.3f}', f'{train_p5_2:.3f}',
-                    f'{acc1_2:.3f}', f'{acc5_2:.3f}', f'{best_acc1_2:.3f}'])
+                    f'{acc1_2:.3f}', f'{acc5_2:.3f}', f'{best_acc1_2:.3f}',
+                    f'{ew2[0]:.6f}', f'{ew2[1]:.6f}', f'{ew2[2]:.6f}'])
                 csv_file_tk.flush()
 
             if epoch == args.epochs - 1:

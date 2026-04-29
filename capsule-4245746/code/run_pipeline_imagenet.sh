@@ -39,8 +39,8 @@ HINTS_DIR="./save/hints/${MODEL_T}_imagenet100"
 
 # Student training loss weights
 GAMMA=1.0
-ALPHA=0.5
-BETA=150.0
+ALPHA=4.0
+BETA=25.0
 
 # CP / Tucker Rank Ratios and CMTF Rank
 CP_RANK_RATIO=0.5
