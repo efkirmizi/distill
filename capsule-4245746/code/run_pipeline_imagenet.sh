@@ -18,7 +18,7 @@ PYTHON="python3"                     # or: /path/to/venv/bin/python
 DATASET="imagenet100"
 MODEL_T="ResNet34"
 MODEL_S="ResNet18"
-TRIAL=1
+TRIAL=0
 NUM_LAYERS=16                        # ResNet34 has 16 BasicBlock sub-blocks
 NUM_CLUSTERS=4                       # 4 hint points for ImageNet experiments
 METRIC="r2"
@@ -33,9 +33,9 @@ WEIGHT_DECAY=0.0001
 IMAGENET_DIR="data/imagenet100"  # must contain train/ and val/ subdirs
 
 # Teacher output path (auto-derived from train_teacher_imagenet100.py naming convention)
-TEACHER_SAVE_DIR="./save/models/${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_DECAY}_trial_0"
-TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_last.pth"
-HINTS_DIR="./save/hints/${MODEL_T}_imagenet100"
+TEACHER_SAVE_DIR="./save/models/${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_DECAY}_trial_${TRIAL}"
+TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_best.pth"
+HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_best"
 
 # Student training loss weights
 GAMMA=1.0

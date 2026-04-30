@@ -20,12 +20,13 @@ set NUM_CLUSTERS=3
 set METRIC=r2
 set EPOCHS=1
 set LEARNING_RATE=0.05
+set WEIGHT_DECAY=0.0005
 set LR_DECAY_EPOCHS=60,120,160
 set BATCH=64
 set NUM_WORKERS=4
 
-set HINTS_DIR=.\save\hints\%MODEL_T%_%DATASET%_last
-set TEACHER_PATH=.\save\models\%MODEL_T%_%DATASET%_lr_%LEARNING_RATE%_decay_0.0005_trial_%TRIAL%\%MODEL_T%_best.pth
+set HINTS_DIR=.\save\hints\%MODEL_T%_%DATASET%_best
+set TEACHER_PATH=.\save\models\%MODEL_T%_%DATASET%_lr_%LEARNING_RATE%_decay_%WEIGHT_DECAY%_trial_%TRIAL%\%MODEL_T%_best.pth
 
 REM ============================================================
 REM Student training loss weights
@@ -42,26 +43,36 @@ set TUCKER_RANK_RATIO=0.25
 set CMTF_RANK=8
 
 REM ============================================================
-REM [1/4] Train Teacher
+REM Dynamic loss weighting (Kendall et al. CVPR 2018) ON/OFF
 REM ============================================================
-echo [1/4] Training Teacher (%MODEL_T%) on %DATASET%...
+set ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+
+REM ============================================================
+REM [1/5] Train Teacher
+REM ============================================================
+echo [1/5] Training Teacher (%MODEL_T%) on %DATASET%...
 %PYTHON% train_teacher.py ^
     --dataset %DATASET% ^
     --model %MODEL_T% ^
     --epochs %EPOCHS% ^
     --learning_rate %LEARNING_RATE% ^
+    --weight_decay %WEIGHT_DECAY% ^
     --lr_decay_epochs %LR_DECAY_EPOCHS% ^
     --batch_size %BATCH% ^
     --num_workers %NUM_WORKERS% ^
     --trial %TRIAL% >> "%LOG%" 2>&1
+if errorlevel 1 (
+    echo ERROR: Teacher training failed. Check %LOG%.
+    goto :error
+)
 echo Teacher training complete. >> %LOG%
 
 REM ============================================================
-REM [2/4] PURSUhInT Step 1: Extract layer representations
+REM [2/5] PURSUhInT Step 1: Extract layer representations
 REM        Run store_hints.py for every sub-block (1..NUM_LAYERS)
 REM ============================================================
-echo [2/4] PURSUhInT Step 1 - Storing %NUM_LAYERS% teacher layer representations...
-echo [2/4] Storing teacher layer representations (%NUM_LAYERS% sub-blocks)... >> %LOG% 2>&1
+echo [2/5] PURSUhInT Step 1 - Storing %NUM_LAYERS% teacher layer representations...
+echo [2/5] Storing teacher layer representations (%NUM_LAYERS% sub-blocks)... >> %LOG% 2>&1
 
 for /L %%i in (1, 1, %NUM_LAYERS%) do (
     echo   Extracting hint %%i / %NUM_LAYERS%...
@@ -79,11 +90,11 @@ for /L %%i in (1, 1, %NUM_LAYERS%) do (
 echo Layer representation extraction complete. >> %LOG%
 
 REM ============================================================
-REM [3/4] PURSUhInT Step 2: Cluster representations with R2_CCA
+REM [3/5] PURSUhInT Step 2: Cluster representations with R2_CCA
 REM        Output: centroid indices as comma-separated string
 REM ============================================================
-echo [3/4] PURSUhInT Step 2 - Clustering layer representations with %METRIC%...
-echo [3/4] Running K-Means clustering (%NUM_CLUSTERS% clusters, metric=%METRIC%)... >> %LOG% 2>&1
+echo [3/5] PURSUhInT Step 2 - Clustering layer representations with %METRIC%...
+echo [3/5] Running K-Means clustering (%NUM_CLUSTERS% clusters, metric=%METRIC%)... >> %LOG% 2>&1
 
 %PYTHON% k_means.py ^
     --hints_dir %HINTS_DIR% ^
@@ -110,12 +121,12 @@ echo PURSUhInT selected hint points: %HINT_POINTS% >> %LOG%
 echo PURSUhInT selected hint points: %HINT_POINTS%
 
 REM ============================================================
-REM [4/4] Train Dual Students (CP + Tucker) using discovered hint points
+REM [4/5] Train Dual Students (CP + Tucker) using discovered hint points
 REM ============================================================
-echo [4/4] Training Dual Students (%MODEL_S%) with PURSUhInT hint points: %HINT_POINTS%...
-echo [4/4] Training students with hint_points=%HINT_POINTS%... >> %LOG% 2>&1
+echo [4/5] Training Dual Students (%MODEL_S%) with PURSUhInT hint points: %HINT_POINTS%...
+echo [4/5] Training students with hint_points=%HINT_POINTS%... >> %LOG% 2>&1
 
-%PYTHON% train_student.py ^
+set TRAIN_CMD=%PYTHON% train_student.py ^
     --dataset %DATASET% ^
     --model_s %MODEL_S% ^
     --model_t %MODEL_T% ^
@@ -132,7 +143,13 @@ echo [4/4] Training students with hint_points=%HINT_POINTS%... >> %LOG% 2>&1
     --batch_size %BATCH% ^
     --hint_points %HINT_POINTS% ^
     --num_workers %NUM_WORKERS% ^
-    -r %GAMMA% -a %ALPHA% -b %BETA% >> %LOG% 2>&1
+    -r %GAMMA% -a %ALPHA% -b %BETA%
+
+if %ENABLE_DYNAMIC_LOSS_WEIGHTS% == 1 (
+    %TRAIN_CMD% --dynamic_loss_weights >> %LOG% 2>&1
+) else (
+    %TRAIN_CMD% >> %LOG% 2>&1
+)
 
 if errorlevel 1 (
     echo ERROR: Student training failed. Check %LOG%.
@@ -140,7 +157,7 @@ if errorlevel 1 (
 )
 
 REM ============================================================
-REM Evaluation
+REM [5/5] Evaluation
 REM ============================================================
 echo [5/5] Running Evaluation Metrics...
 
@@ -156,6 +173,10 @@ set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODE
     --path_s_tucker "!STUDENT_DIR!\%MODEL_S%_best_tucker.pth" ^
     --cp_rank_ratio %CP_RANK_RATIO% ^
     --tucker_rank_ratio %TUCKER_RANK_RATIO% >> %LOG% 2>&1
+
+if errorlevel 1 (
+    echo WARNING: Evaluation failed. Check %LOG%.
+)
 
 echo.
 echo ============================================================

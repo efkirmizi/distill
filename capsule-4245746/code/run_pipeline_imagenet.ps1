@@ -45,8 +45,8 @@ $WEIGHT_DECAY = 0.0001
 $IMAGENET_DIR = "data\imagenet_tiny"
 
 $TEACHER_SAVE_DIR = ".\save\models\${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_DECAY}_trial_0"
-$TEACHER_PATH = "${TEACHER_SAVE_DIR}\${MODEL_T}_last.pth"
-$HINTS_DIR = ".\save\hints\${MODEL_T}_${DATASET}"
+$TEACHER_PATH = "${TEACHER_SAVE_DIR}\${MODEL_T}_best.pth"
+$HINTS_DIR = ".\save\hints\${MODEL_T}_${DATASET}_best"
 
 # Student training loss weights
 $GAMMA = "1.0"

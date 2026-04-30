@@ -783,7 +783,6 @@ def main():
                 acc1, acc5, best_acc1))
             if loss_weighter is not None:
                 ew = loss_weighter.effective_weights()
-                print('  [DynW CP]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*ew))
             else:
                 ew = [args.gamma, args.alpha, args.beta]
 
@@ -812,7 +811,6 @@ def main():
                 save_checkpoint(tk_ckpt, is_best_2, args.save_folder, tag='tucker')
                 if loss_weighter_2 is not None:
                     ew2 = loss_weighter_2.effective_weights()
-                    print('  [DynW Tucker]  cls={:.4f}  div={:.4f}  kd={:.4f}'.format(*ew2))
                 else:
                     ew2 = [args.gamma, args.alpha, args.beta]
 

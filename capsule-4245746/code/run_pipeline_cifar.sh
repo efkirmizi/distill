@@ -31,8 +31,8 @@ WEIGHT_DECAY=0.0005                  # Standard CIFAR WD
 
 # Paths
 TEACHER_SAVE_DIR="./save/models/${MODEL_T}_${DATASET}_lr_${LR}_decay_${WEIGHT_DECAY}_trial_${TRIAL}"
-TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_last.pth"
-HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_last"
+TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_best.pth"
+HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_best"
 
 # Student training loss weights (Optimized 65/15/20 Split)
 GAMMA=1.0
