@@ -715,9 +715,11 @@ def main():
     csv_file_cp = open(csv_path_cp, file_mode, newline='')
     csv_writer_cp = csv.writer(csv_file_cp)
     if write_header_cp:
-        csv_writer_cp.writerow(['epoch', 'lr', 'train_loss', 'train_acc1', 'train_acc5',
-                            'val_acc1', 'val_acc5', 'best_acc1',
-                            'w_cls', 'w_div', 'w_kd'])
+        csv_writer_cp.writerow(['epoch', 'lr', 'epoch_time',
+                                'train_acc', 'train_acc_top5', 'train_loss',
+                                'train_loss_cls', 'train_loss_div', 'train_loss_kd',
+                                'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
+                                'w_cls', 'w_div', 'w_kd'])
     print(f'CSV log: {csv_path_cp}')
 
     if args.dual_cmtf:
@@ -726,8 +728,10 @@ def main():
         csv_file_tk = open(csv_path_tk, file_mode, newline='')
         csv_writer_tk = csv.writer(csv_file_tk)
         if write_header_tk:
-            csv_writer_tk.writerow(['epoch', 'lr', 'train_loss', 'train_acc1', 'train_acc5',
-                                    'val_acc1', 'val_acc5', 'best_acc1',
+            csv_writer_tk.writerow(['epoch', 'lr', 'epoch_time',
+                                    'train_acc', 'train_acc_top5', 'train_loss',
+                                    'train_loss_cls', 'train_loss_div', 'train_loss_kd',
+                                    'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
                                     'w_cls', 'w_div', 'w_kd'])
         print(f'Tucker CSV log: {csv_path_tk}')
 
@@ -736,29 +740,36 @@ def main():
 
     for epoch in range(args.start_epoch, args.epochs):
         # ---- Train ----
+        time1 = time.time()
         if args.distill is not None:
             if args.dual_cmtf:
-                avg_train_time, train_loss, train_p1, train_p5, train_loss_2, train_p1_2, train_p5_2 = train_kd(
+                (avg_train_time, train_loss, train_p1, train_p5,
+                 train_loss_cls, train_loss_div, train_loss_kd,
+                 train_loss_2, train_p1_2, train_p5_2,
+                 train_loss_cls_2, train_loss_div_2, train_loss_kd_2) = train_kd(
                     train_loader, module_list, criterion_list, optimizer, epoch,
                     module_list_2=module_list_2, criterion_list_2=criterion_list_2, optimizer_2=optimizer_2,
                     loss_weighter=loss_weighter, loss_weighter_2=loss_weighter_2)
             else:
-                avg_train_time, train_loss, train_p1, train_p5 = train_kd(
+                (avg_train_time, train_loss, train_p1, train_p5,
+                 train_loss_cls, train_loss_div, train_loss_kd) = train_kd(
                     train_loader, module_list, criterion_list, optimizer, epoch,
                     loss_weighter=loss_weighter)
         else:
             avg_train_time, train_loss, train_p1, train_p5 = train(
                 train_loader, model_s, criterion_cls, optimizer, epoch)
-            
+            train_loss_cls, train_loss_div, train_loss_kd = train_loss, 0.0, 0.0
+
+        epoch_time = time.time() - time1
         total_time.update(avg_train_time)
         if args.test:
             break
 
         # ---- Validate ----
         if args.dual_cmtf:
-            acc1, acc5, acc1_2, acc5_2 = validate(val_loader, model_s, criterion_cls, model_s2=model_s2)
+            acc1, acc5, acc1_2, acc5_2, test_loss, test_loss_2 = validate(val_loader, model_s, criterion_cls, model_s2=model_s2)
         else:
-            acc1, acc5 = validate(val_loader, model_s, criterion_cls)
+            acc1, acc5, test_loss = validate(val_loader, model_s, criterion_cls)
         
         # ---- Save best / checkpoint ----
         if args.local_rank == 0:
@@ -788,9 +799,10 @@ def main():
 
             # ---- CSV row ----
             csv_writer_cp.writerow([
-                epoch, f'{current_lr:.6f}',
-                f'{train_loss:.4f}', f'{train_p1:.3f}', f'{train_p5:.3f}',
-                f'{acc1:.3f}', f'{acc5:.3f}', f'{best_acc1:.3f}',
+                epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
+                f'{train_p1:.3f}', f'{train_p5:.3f}', f'{train_loss:.4f}',
+                f'{train_loss_cls:.4f}', f'{train_loss_div:.4f}', f'{train_loss_kd:.4f}',
+                f'{acc1:.3f}', f'{acc5:.3f}', f'{test_loss:.4f}', f'{best_acc1:.3f}',
                 f'{ew[0]:.6f}', f'{ew[1]:.6f}', f'{ew[2]:.6f}'])
             csv_file_cp.flush()
 
@@ -818,9 +830,10 @@ def main():
                     acc1_2, acc5_2, best_acc1_2))
 
                 csv_writer_tk.writerow([
-                    epoch, f'{current_lr:.6f}',
-                    f'{train_loss_2:.4f}', f'{train_p1_2:.3f}', f'{train_p5_2:.3f}',
-                    f'{acc1_2:.3f}', f'{acc5_2:.3f}', f'{best_acc1_2:.3f}',
+                    epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
+                    f'{train_p1_2:.3f}', f'{train_p5_2:.3f}', f'{train_loss_2:.4f}',
+                    f'{train_loss_cls_2:.4f}', f'{train_loss_div_2:.4f}', f'{train_loss_kd_2:.4f}',
+                    f'{acc1_2:.3f}', f'{acc5_2:.3f}', f'{test_loss_2:.4f}', f'{best_acc1_2:.3f}',
                     f'{ew2[0]:.6f}', f'{ew2[1]:.6f}', f'{ew2[2]:.6f}'])
                 csv_file_tk.flush()
 
@@ -980,8 +993,10 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         model_s2 = module_list_2[0]
         criterion_cls_2, criterion_div_2, criterion_kd_2 = criterion_list_2[0], criterion_list_2[1], criterion_list_2[2]
         losses_2, top1_2, top5_2 = AverageMeter(), AverageMeter(), AverageMeter()
+        losses_cls_2, losses_div_2, losses_kd_2 = AverageMeter(), AverageMeter(), AverageMeter()
 
     batch_time, losses, top1, top5 = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+    losses_cls, losses_div, losses_kd = AverageMeter(), AverageMeter(), AverageMeter()
     end = time.time()
     train_loader_len = get_loader_len(train_loader, args.batch_size, args.use_dali)
 
@@ -1025,6 +1040,9 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         else:
             loss.backward()
         optimizer.step()
+        losses_cls.update(loss_cls.item(), inp.size(0))
+        losses_div.update(loss_div.item(), inp.size(0))
+        losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
 
         # ---- Process Tucker Student ----
         if dual:
@@ -1045,6 +1063,9 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             else:
                 loss_2.backward()
             optimizer_2.step()
+            losses_cls_2.update(loss_cls_2.item(), inp.size(0))
+            losses_div_2.update(loss_div_2.item(), inp.size(0))
+            losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else float(loss_kd_2), inp.size(0))
 
         # ---- Logging & Metrics ----
         if i % args.print_freq == 0:
@@ -1090,8 +1111,11 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             quit()
 
     if dual:
-        return batch_time.avg, losses.avg, top1.avg, top5.avg, losses_2.avg, top1_2.avg, top5_2.avg
-    return batch_time.avg, losses.avg, top1.avg, top5.avg
+        return (batch_time.avg, losses.avg, top1.avg, top5.avg,
+                losses_cls.avg, losses_div.avg, losses_kd.avg,
+                losses_2.avg, top1_2.avg, top5_2.avg,
+                losses_cls_2.avg, losses_div_2.avg, losses_kd_2.avg)
+    return batch_time.avg, losses.avg, top1.avg, top5.avg, losses_cls.avg, losses_div.avg, losses_kd.avg
 
 
 def validate(val_loader, model, criterion, model_s2=None):
@@ -1156,9 +1180,9 @@ def validate(val_loader, model, criterion, model_s2=None):
     print(' * [CP] Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
     if dual:
         print(' * [Tucker] Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1_2, top5=top5_2))
-        return top1.avg, top5.avg, top1_2.avg, top5_2.avg
+        return top1.avg, top5.avg, top1_2.avg, top5_2.avg, losses.avg, losses_2.avg
 
-    return top1.avg, top5.avg
+    return top1.avg, top5.avg, losses.avg
 
 
 # ==================================================================================
