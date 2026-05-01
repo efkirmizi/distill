@@ -506,9 +506,9 @@ def main():
             criterion_kd = Attention()
 
         elif args.distill == 'pursuhint_cmtf':
-            criterion_kd = CoupledTensorLoss(model=model_s, rank=args.cmtf_rank, iter_max=10)
+            criterion_kd = CoupledTensorLoss(model=model_s, rank=args.cmtf_rank, iter_max=100)
             if args.dual_cmtf:
-                criterion_kd_2 = CoupledTensorLoss(model=model_s2, rank=args.cmtf_rank, iter_max=10)
+                criterion_kd_2 = CoupledTensorLoss(model=model_s2, rank=args.cmtf_rank, iter_max=100)
 
         else:
             raise NotImplementedError(args.distill)
@@ -1043,6 +1043,8 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         losses_cls.update(loss_cls.item(), inp.size(0))
         losses_div.update(loss_div.item(), inp.size(0))
         losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
+        if dual:
+            torch.cuda.empty_cache()
 
         # ---- Process Tucker Student ----
         if dual:

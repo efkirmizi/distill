@@ -405,9 +405,9 @@ def main():
         trainable_list.append(criterion_kd)
     elif opt.distill == 'pursuhint_cmtf':
         # Pass the specific model so the loss function can call .get_factors() internally
-        criterion_kd = CoupledTensorLoss(model=model_s, rank=opt.cmtf_rank, iter_max=10)
+        criterion_kd = CoupledTensorLoss(model=model_s, rank=opt.cmtf_rank, iter_max=100)
         if opt.dual_cmtf:
-            criterion_kd_2 = CoupledTensorLoss(model=model_s2, rank=opt.cmtf_rank, iter_max=10)
+            criterion_kd_2 = CoupledTensorLoss(model=model_s2, rank=opt.cmtf_rank, iter_max=100)
     else:
         raise NotImplementedError(opt.distill)
 
@@ -486,43 +486,59 @@ def main():
         print('student Tucker accuracy: ', student2_acc)
 
     print("==> Precomputing teacher outputs to save compute...")
-    
+
     precompute_loader = torch.utils.data.DataLoader(
-        train_loader.dataset, batch_size=opt.batch_size, 
+        train_loader.dataset, batch_size=opt.batch_size,
         shuffle=False, num_workers=opt.num_workers, drop_last=False
     )
 
     n_data = len(train_loader.dataset)
     hint_indices = [int(i) for i in opt.hint_points.split(',')]
 
-    # Pre-allocate tensors for fast batch indexing (replaces slow per-sample dict)
-    teacher_logits = torch.zeros(n_data, n_cls)
-    teacher_feats = None  # will be initialized on first batch
-
-    model_t.eval()
+    # Estimate CPU RAM needed before committing: probe teacher with one sample
     with torch.no_grad():
-        for idx, data in enumerate(precompute_loader):
-            if opt.distill in ['crd', 'WSL_crd', 'ATT_crd']:
-                input_t, _, index_t, _ = data
-            else:
-                input_t, _, index_t = data
-            input_t = input_t.float().cuda()
-            with torch.amp.autocast('cuda', enabled=True):
-                feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=opt.preact)
-                feat_t_selected = [feat_t_batch[hi].detach().cpu() for hi in hint_indices]
-                logit_t_batch = logit_t_batch.detach().cpu()
+        if opt.dataset in ['cifar10', 'cifar100']:
+            _probe = torch.randn(1, 3, 32, 32).cuda()
+        else:
+            _probe = torch.randn(1, 3, 224, 224).cuda()
+        _feats, _ = model_t(_probe, is_feat=True, preact=opt.preact)
+        _feat_bytes = sum(n_data * _feats[hi].numel() * 4 for hi in hint_indices)
+        del _probe, _feats
 
-            # Initialize storage tensors on first batch
-            if teacher_feats is None:
-                teacher_feats = [torch.zeros(n_data, *f.shape[1:]) for f in feat_t_selected]
+    _total_cache_gb = (_feat_bytes + n_data * n_cls * 4) / 1024 ** 3
+    _CACHE_LIMIT_GB = 4.0
 
-            teacher_logits[index_t] = logit_t_batch.float()
-            for hp_idx, f in enumerate(feat_t_selected):
-                teacher_feats[hp_idx][index_t] = f.float()
+    if _total_cache_gb > _CACHE_LIMIT_GB:
+        print(f"==> Cache would need {_total_cache_gb:.1f} GB — "
+              f"teacher features computed on-the-fly (no RAM overhead).")
+        teacher_cache = None
+    else:
+        teacher_logits = torch.zeros(n_data, n_cls)
+        teacher_feats = None
 
-    teacher_cache = (teacher_logits, teacher_feats)
-    print(f'==> Teacher cache ready: logits {teacher_logits.shape}, '
-          f'{len(teacher_feats)} feat tensors')
+        model_t.eval()
+        with torch.no_grad():
+            for idx, data in enumerate(precompute_loader):
+                if opt.distill in ['crd', 'WSL_crd', 'ATT_crd']:
+                    input_t, _, index_t, _ = data
+                else:
+                    input_t, _, index_t = data
+                input_t = input_t.float().cuda()
+                with torch.amp.autocast('cuda', enabled=True):
+                    feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=opt.preact)
+                    feat_t_selected = [feat_t_batch[hi].detach().cpu() for hi in hint_indices]
+                    logit_t_batch = logit_t_batch.detach().cpu()
+
+                if teacher_feats is None:
+                    teacher_feats = [torch.zeros(n_data, *f.shape[1:]) for f in feat_t_selected]
+
+                teacher_logits[index_t] = logit_t_batch.float()
+                for hp_idx, f in enumerate(feat_t_selected):
+                    teacher_feats[hp_idx][index_t] = f.float()
+
+        teacher_cache = (teacher_logits, teacher_feats)
+        print(f'==> Teacher cache ready: logits {teacher_logits.shape}, '
+              f'{len(teacher_feats)} feat tensors')
 
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
 

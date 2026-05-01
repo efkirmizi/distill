@@ -262,6 +262,8 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         else:
             loss.backward()
             optimizer.step()
+        if dual:
+            torch.cuda.empty_cache()
 
         # ===================forward+backward Tucker student (dual mode)=====================
         if dual:

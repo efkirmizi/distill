@@ -17,7 +17,7 @@ class CoupledTensorLoss(nn.Module):
              spatial latent signatures (R×R), and aligns them with the student's
              structural weight factors obtained via get_factors().
     """
-    def __init__(self, model=None, rank=16, iter_max=5, **kwargs):
+    def __init__(self, model=None, rank=16, iter_max=100, **kwargs):
         super(CoupledTensorLoss, self).__init__()
         self.rank = rank
         self.iter_max = iter_max
@@ -124,7 +124,7 @@ class CoupledTensorLoss(nn.Module):
             for t_feat in f_t:
                 try:
                     _, factors_t = parafac(
-                        t_feat, rank=self.rank, init='random',
+                        t_feat, rank=self.rank, init='svd',
                         n_iter_max=self.iter_max, tol=1e-4
                     )
                     # Spatial factors: Height (H, R) and Width (W, R)
@@ -147,6 +147,8 @@ class CoupledTensorLoss(nn.Module):
                         loss += self._align_and_compare(cov_w_w, cov_t_w)
 
                 except Exception as e:
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     warnings.warn(f"CMTF Part 2 (structural coupling) failed and was skipped: {e}", stacklevel=2)
 
         return loss
