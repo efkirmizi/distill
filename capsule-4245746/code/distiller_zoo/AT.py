@@ -16,13 +16,10 @@ class Attention(nn.Module):
         return [self.at_loss(f_s, f_t) for f_s, f_t in zip(g_s, g_t)]
 
     def at_loss(self, f_s, f_t):
-        s_H, t_H = f_s.shape[2], f_t.shape[2]
-        if s_H > t_H:
-            f_s = F.adaptive_avg_pool2d(f_s, (t_H, t_H))
-        elif s_H < t_H:
-            f_t = F.adaptive_avg_pool2d(f_t, (s_H, s_H))
-        else:
-            pass
+        if f_s.shape[2:] != f_t.shape[2:]:
+            target = (min(f_s.shape[2], f_t.shape[2]), min(f_s.shape[3], f_t.shape[3]))
+            f_s = F.adaptive_avg_pool2d(f_s, target)
+            f_t = F.adaptive_avg_pool2d(f_t, target)
         return (self.at(f_s) - self.at(f_t)).pow(2).mean()
 
     def at(self, f):

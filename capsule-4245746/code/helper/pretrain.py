@@ -73,7 +73,7 @@ def init(model_s, model_t, init_modules, criterion, train_loader, logger, opt):
                 loss_group = criterion(feat_s[:-1], feat_t[:-1])
                 loss = sum(loss_group)
             else:
-                raise NotImplemented('Not supported in init training: {}'.format(opt.distill))
+                raise NotImplementedError('Not supported in init training: {}'.format(opt.distill))
 
             losses.update(loss.item(), input.size(0))
 

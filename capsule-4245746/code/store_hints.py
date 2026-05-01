@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument('--dataset', type=str, default='cifar100', choices=['cifar10', 'cifar100'], help='Dataset to use for extracting representations.')
     parser.add_argument('--preact', type=bool, default=False, help='Extract pre-activation hints.')
     parser.add_argument('--hints_path', type=str, default=None, help='Output directory for hint .pt files. Defaults to ./save/hints/<model_name>.')
-    parser.add_argument('--data_folder', type=str, default='../data', help='Path to the dataset root directory.')
+    parser.add_argument('--data_folder', type=str, default='./data', help='Path to the dataset root directory.')
     return parser.parse_args()
 
 
