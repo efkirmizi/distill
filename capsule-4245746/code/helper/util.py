@@ -33,7 +33,8 @@ def adjust_learning_rate_with_warmup(epoch, opt, optimizer, warmup_epochs=5):
             new_lr = opt.learning_rate 
 
     for param_group in optimizer.param_groups:
-        param_group['lr'] = new_lr
+        if not param_group.get('fix_lr', False):
+            param_group['lr'] = new_lr
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

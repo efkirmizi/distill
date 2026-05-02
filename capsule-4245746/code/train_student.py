@@ -58,6 +58,8 @@ def parse_option():
     parser.add_argument('--epochs', type=int, default=240, help='number of training epochs')
 
     parser.add_argument('--start_epoch', type=int, default=1)
+    parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to student save_folder to resume training from checkpoint_cp.pth / checkpoint_tucker.pth')
     parser.add_argument('--init_epochs', type=int, default=30, help='init training for two-stage methods')
 
     # optimization
@@ -452,12 +454,12 @@ def main():
     if opt.dynamic_loss_weights:
         optimizer = optim.SGD([
             {'params': trainable_list.parameters(), 'weight_decay': opt.weight_decay},
-            {'params': loss_weighter.parameters(), 'weight_decay': 0.0},
+            {'params': loss_weighter.parameters(), 'weight_decay': 0.0, 'fix_lr': True},
         ], lr=opt.learning_rate, momentum=opt.momentum)
         if opt.dual_cmtf:
             optimizer_2 = optim.SGD([
                 {'params': trainable_list_2.parameters(), 'weight_decay': opt.weight_decay},
-                {'params': loss_weighter_2.parameters(), 'weight_decay': 0.0},
+                {'params': loss_weighter_2.parameters(), 'weight_decay': 0.0, 'fix_lr': True},
             ], lr=opt.learning_rate, momentum=opt.momentum)
     else:
         optimizer = optim.SGD(trainable_list.parameters(),
@@ -562,31 +564,65 @@ def main():
     scaler = torch.amp.GradScaler('cuda')
     if opt.dual_cmtf:
         scaler_2 = torch.amp.GradScaler('cuda')
-    # routine
+
+    # ---- Resume ----
+    if opt.resume:
+        cp_path = os.path.join(opt.resume, 'checkpoint_cp.pth')
+        tk_path = os.path.join(opt.resume, 'checkpoint_tucker.pth')
+        if os.path.isfile(cp_path):
+            print(f"=> loading CP checkpoint '{cp_path}'")
+            ckpt = torch.load(cp_path, map_location='cpu')
+            opt.start_epoch = ckpt['epoch'] + 1
+            best_acc = ckpt.get('best_acc', 0.0)
+            model_s.load_state_dict(ckpt['model'])
+            optimizer.load_state_dict(ckpt['optimizer'])
+            scaler.load_state_dict(ckpt['scaler'])
+            if loss_weighter is not None and 'loss_weighter' in ckpt:
+                loss_weighter.load_state_dict(ckpt['loss_weighter'])
+            print(f"=> resumed from epoch {ckpt['epoch']}, best_acc={best_acc:.2f}")
+        else:
+            print(f"=> no CP checkpoint found at '{cp_path}'")
+        if opt.dual_cmtf:
+            if os.path.isfile(tk_path):
+                print(f"=> loading Tucker checkpoint '{tk_path}'")
+                ckpt2 = torch.load(tk_path, map_location='cpu')
+                best_acc_2 = ckpt2.get('best_acc', 0.0)
+                model_s2.load_state_dict(ckpt2['model'])
+                optimizer_2.load_state_dict(ckpt2['optimizer'])
+                scaler_2.load_state_dict(ckpt2['scaler'])
+                if loss_weighter_2 is not None and 'loss_weighter' in ckpt2:
+                    loss_weighter_2.load_state_dict(ckpt2['loss_weighter'])
+                print(f"=> Tucker resumed from epoch {ckpt2['epoch']}, best_acc={best_acc_2:.2f}")
+            else:
+                print(f"=> no Tucker checkpoint found at '{tk_path}'")
 
     print('the number of teacher model parameters: {}'.format(sum([p.data.nelement() for p in model_t.parameters()])))
     print('the number of student model parameters: {}'.format(sum([p.data.nelement() for p in model_s.parameters()])))
 
     # --- CSV Logger Setup ---
     csv_path_cp = os.path.join(opt.save_folder, 'training_log_cp.csv')
-    csv_file_cp = open(csv_path_cp, 'w', newline='')
+    _resume_cp_csv = bool(opt.resume) and os.path.exists(csv_path_cp)
+    csv_file_cp = open(csv_path_cp, 'a' if _resume_cp_csv else 'w', newline='')
     csv_writer_cp = csv.writer(csv_file_cp)
-    csv_writer_cp.writerow(['epoch', 'lr', 'epoch_time',
-                            'train_acc', 'train_acc_top5', 'train_loss',
-                            'train_loss_cls', 'train_loss_div', 'train_loss_kd',
-                            'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
-                            'w_cls', 'w_div', 'w_kd'])
+    if not _resume_cp_csv:
+        csv_writer_cp.writerow(['epoch', 'lr', 'epoch_time',
+                                'train_acc', 'train_acc_top5', 'train_loss',
+                                'train_loss_cls', 'train_loss_div', 'train_loss_kd',
+                                'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
+                                'w_cls', 'w_div', 'w_kd'])
     print(f'CP CSV log: {csv_path_cp}')
 
     if opt.dual_cmtf:
         csv_path_tk = os.path.join(opt.save_folder, 'training_log_tucker.csv')
-        csv_file_tk = open(csv_path_tk, 'w', newline='')
+        _resume_tk_csv = bool(opt.resume) and os.path.exists(csv_path_tk)
+        csv_file_tk = open(csv_path_tk, 'a' if _resume_tk_csv else 'w', newline='')
         csv_writer_tk = csv.writer(csv_file_tk)
-        csv_writer_tk.writerow(['epoch', 'lr', 'epoch_time',
-                            'train_acc', 'train_acc_top5', 'train_loss',
-                            'train_loss_cls', 'train_loss_div', 'train_loss_kd',
-                            'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
-                            'w_cls', 'w_div', 'w_kd'])
+        if not _resume_tk_csv:
+            csv_writer_tk.writerow(['epoch', 'lr', 'epoch_time',
+                                'train_acc', 'train_acc_top5', 'train_loss',
+                                'train_loss_cls', 'train_loss_div', 'train_loss_kd',
+                                'test_acc', 'test_acc_top5', 'test_loss', 'best_acc',
+                                'w_cls', 'w_div', 'w_kd'])
         print(f'Tucker CSV log: {csv_path_tk}')
 
     def _f(v):
@@ -699,6 +735,30 @@ def main():
                 save_file2 = os.path.join(opt.save_folder, '{}_best_tucker.pth'.format(opt.model_s))
                 print('saving the best Tucker model!')
                 torch.save(state2, save_file2)
+
+        # rolling checkpoint for resume (overwrites every epoch)
+        ckpt_cp = {
+            'epoch': epoch,
+            'model': model_s.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scaler': scaler.state_dict(),
+            'best_acc': best_acc,
+        }
+        if loss_weighter is not None:
+            ckpt_cp['loss_weighter'] = loss_weighter.state_dict()
+        torch.save(ckpt_cp, os.path.join(opt.save_folder, 'checkpoint_cp.pth'))
+
+        if opt.dual_cmtf:
+            ckpt_tk = {
+                'epoch': epoch,
+                'model': model_s2.state_dict(),
+                'optimizer': optimizer_2.state_dict(),
+                'scaler': scaler_2.state_dict(),
+                'best_acc': best_acc_2,
+            }
+            if loss_weighter_2 is not None:
+                ckpt_tk['loss_weighter'] = loss_weighter_2.state_dict()
+            torch.save(ckpt_tk, os.path.join(opt.save_folder, 'checkpoint_tucker.pth'))
 
         # --- CSV: write epoch rows (after best_acc update so the column is accurate) ---
         if loss_weighter is not None:

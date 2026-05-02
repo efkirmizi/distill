@@ -54,11 +54,27 @@ CMTF_RANK=8
 CMTF_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual CMTF
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
-USE_VBMF=0
+USE_VBMF=1
 if [ "$USE_VBMF" -eq 1 ]; then
     VBMF_FLAG="--use_vbmf"
 else
     VBMF_FLAG=""
+fi
+
+# PyTorch Compile Optimization ON/OFF (disabled by default for DDP)
+ENABLE_TORCH_COMPILE=1
+if [ "$ENABLE_TORCH_COMPILE" -eq 1 ]; then
+    TORCH_COMPILE="--torch_compile"
+else
+    TORCH_COMPILE=""
+fi
+
+# Dynamic loss weighting (Kendall et al. CVPR 2018) ON/OFF
+ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+if [ "$ENABLE_DYNAMIC_LOSS_WEIGHTS" -eq 1 ]; then
+    DYNAMIC_LOSS_WEIGHTS="--dynamic_loss_weights"
+else
+    DYNAMIC_LOSS_WEIGHTS=""
 fi
 
 # Log file
@@ -79,14 +95,6 @@ RUN_EVALUATION=1
 # Use standard DataLoader instead of DALI? (set to 1 for local debugging)
 USE_NO_DALI=0
 
-# Dynamic loss weighting (Kendall et al. CVPR 2018) ON/OFF
-ENABLE_DYNAMIC_LOSS_WEIGHTS=1
-if [ "$ENABLE_DYNAMIC_LOSS_WEIGHTS" -eq 1 ]; then
-    DYNAMIC_LOSS_WEIGHTS="--dynamic_loss_weights"
-else
-    DYNAMIC_LOSS_WEIGHTS=""
-fi
-
 # ==============================================================================
 # [1/5] Train Teacher
 # ==============================================================================
@@ -103,7 +111,8 @@ if [ "$RUN_TEACHER" -eq 1 ]; then
         --weight_decay ${WEIGHT_DECAY} \
         --lr_decay_epochs 30,60,90 \
         --num_workers ${NUM_WORKERS} \
-        --trial ${TRIAL} >> "${LOG}" 2>&1 || { echo "ERROR: Teacher training failed. Check ${LOG}."; exit 1; }
+        --trial ${TRIAL} \
+        ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "ERROR: Teacher training failed. Check ${LOG}."; exit 1; }
 
     echo "Teacher training complete." >> "${LOG}"
 else
@@ -187,7 +196,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
     # Number of GPUs to use for training
     NUM_GPUS=1
 
-    ${PYTHON} -m torch.distributed.launch --master_port 9200 --nproc_per_node=${NUM_GPUS} train_stu_imagenet100.py \
+    torchrun --nproc_per_node=${NUM_GPUS} --master_port 9200 train_stu_imagenet100.py \
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
@@ -209,6 +218,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --beta ${BETA} \
         ${VBMF_FLAG} ${DALI_FLAG} \
         ${DYNAMIC_LOSS_WEIGHTS} \
+        ${TORCH_COMPILE} \
         "${IMAGENET_DIR}" >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"
@@ -234,7 +244,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_best_tucker.pth" \
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
-        ${VBMF_FLAG} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
+        ${VBMF_FLAG} ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
     echo "[5/5] SKIPPED (RUN_EVALUATION=0)"
 fi

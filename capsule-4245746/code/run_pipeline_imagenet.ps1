@@ -44,7 +44,7 @@ $WEIGHT_DECAY = 0.0001
 # Paths
 $IMAGENET_DIR = "data\imagenet_tiny"
 
-$TEACHER_SAVE_DIR = ".\save\models\${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_DECAY}_trial_0"
+$TEACHER_SAVE_DIR = ".\save\models\${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_DECAY}_trial_${TRIAL}"
 $TEACHER_PATH = "${TEACHER_SAVE_DIR}\${MODEL_T}_best.pth"
 $HINTS_DIR = ".\save\hints\${MODEL_T}_${DATASET}_best"
 
@@ -99,7 +99,8 @@ if ($RUN_TEACHER -eq 1) {
         --learning_rate $LR `
         --weight_decay $WEIGHT_DECAY `
         --lr_decay_epochs "30,60,90" `
-        --num_workers $NUM_WORKERS *>> $LOG
+        --num_workers $NUM_WORKERS `
+        --trial $TRIAL *>> $LOG
 
     if ($LASTEXITCODE -ne 0) {
         Write-Error "ERROR: Teacher training failed. Check $LOG."
@@ -204,6 +205,7 @@ if ($RUN_TRAINING -eq 1) {
         "--cmtf_coupling_weight", $CMTF_COUPLING_WEIGHT,
         "--epochs", $STUDENT_EPOCHS,
         "--lr", $LR,
+        "--weight-decay", $WEIGHT_DECAY,
         "--batch-size", $BATCH,
         "--workers", $NUM_WORKERS,
         "--hint_points", $HINT_POINTS,

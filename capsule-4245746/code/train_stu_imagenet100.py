@@ -555,12 +555,12 @@ def main():
     if args.dynamic_loss_weights:
         optimizer = torch.optim.SGD([
             {'params': trainable_list.parameters(), 'weight_decay': args.weight_decay},
-            {'params': loss_weighter.parameters(), 'weight_decay': 0.0},
+            {'params': loss_weighter.parameters(), 'weight_decay': 0.0, 'fix_lr': True},
         ], args.lr, momentum=args.momentum)
         if args.dual_cmtf:
             optimizer_2 = torch.optim.SGD([
                 {'params': trainable_list_2.parameters(), 'weight_decay': args.weight_decay},
-                {'params': loss_weighter_2.parameters(), 'weight_decay': 0.0},
+                {'params': loss_weighter_2.parameters(), 'weight_decay': 0.0, 'fix_lr': True},
             ], args.lr, momentum=args.momentum)
     else:
         optimizer = torch.optim.SGD(trainable_list.parameters(), args.lr,
@@ -1270,7 +1270,8 @@ def adjust_learning_rate(optimizer, epoch, step, len_epoch):
         lr = lr * float(1 + step + epoch * len_epoch) / (5. * len_epoch)
 
     for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+        if not param_group.get('fix_lr', False):
+            param_group['lr'] = lr
 
 
 def accuracy(output, target, topk=(1,)):
