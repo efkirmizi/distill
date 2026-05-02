@@ -693,7 +693,6 @@ def main():
 
         if loss_weighter is not None:
             w = loss_weighter.effective_weights()
-            print(f'  [DynW CP]  cls={w[0]:.4f}  div={w[1]:.4f}  kd={w[2]:.4f}')
             logger.log_value('dyn_w_cls_cp', w[0], epoch)
             logger.log_value('dyn_w_div_cp', w[1], epoch)
             logger.log_value('dyn_w_kd_cp',  w[2], epoch)
@@ -704,7 +703,6 @@ def main():
             print('test_acc_top5 Tucker:', test_acc_top5_2)
             if loss_weighter_2 is not None:
                 w2 = loss_weighter_2.effective_weights()
-                print(f'  [DynW Tucker]  cls={w2[0]:.4f}  div={w2[1]:.4f}  kd={w2[2]:.4f}')
                 logger.log_value('dyn_w_cls_tucker', w2[0], epoch)
                 logger.log_value('dyn_w_div_tucker', w2[1], epoch)
                 logger.log_value('dyn_w_kd_tucker',  w2[2], epoch)
