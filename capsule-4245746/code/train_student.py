@@ -416,8 +416,8 @@ def main():
         # add this as some parameters in VIDLoss need to be updated
         trainable_list.append(criterion_kd)
     elif opt.distill == 'pursuhint_cmtf':
-        # Pass the specific model so the loss function can call .get_factors() internally
-        criterion_kd = CoupledTensorLoss(rank=opt.cmtf_rank)
+        criterion_kd = CoupledTensorLoss(rank=opt.cmtf_rank,
+                                         coupling_weight=opt.cmtf_coupling_weight)
         if opt.dual_cmtf:
             criterion_kd_2 = CoupledTensorLoss(rank=opt.cmtf_rank,
                                                coupling_weight=opt.cmtf_coupling_weight)

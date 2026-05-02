@@ -365,6 +365,9 @@ def main():
     best_acc1_2 = 0
     args = parse()
 
+    if args.dual_cmtf and args.distill != 'pursuhint_cmtf':
+        raise ValueError("--dual_cmtf requires --distill pursuhint_cmtf")
+
     # ---- Test mode ----
     if args.test:
         args.opt_level = None
@@ -519,7 +522,8 @@ def main():
             criterion_kd = Attention()
 
         elif args.distill == 'pursuhint_cmtf':
-            criterion_kd = CoupledTensorLoss(rank=args.cmtf_rank)
+            criterion_kd = CoupledTensorLoss(rank=args.cmtf_rank,
+                                             coupling_weight=args.cmtf_coupling_weight)
             if args.dual_cmtf:
                 criterion_kd_2 = CoupledTensorLoss(rank=args.cmtf_rank,
                                                    coupling_weight=args.cmtf_coupling_weight)
@@ -1083,12 +1087,12 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t, target) if args.distill == 'WSL_att' else criterion_div_2(logit_s2, logit_t)
 
-                coupling = [p.detach() for p in proj_cp] if proj_cp is not None else None
-                loss_kd_2, _ = criterion_kd_2(
+                loss_kd_2 = criterion_kd_2(
                     [f.float() for f in feat_s2],
                     [f.float() for f in feat_t],
-                    coupling_proj=coupling
                 )
+                if isinstance(loss_kd_2, (tuple, list)):
+                    loss_kd_2 = loss_kd_2[0]
 
             if loss_weighter_2 is not None:
                 loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)

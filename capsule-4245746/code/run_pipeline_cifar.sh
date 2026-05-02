@@ -192,6 +192,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --cmtf_coupling_weight ${CMTF_COUPLING_WEIGHT} \
         --epochs ${EPOCHS} \
         --learning_rate ${LR} \
+        --weight_decay ${WEIGHT_DECAY} \
         --lr_decay_epochs ${LR_DECAY_EPOCHS} \
         --batch_size ${BATCH} \
         --num_workers ${NUM_WORKERS} \

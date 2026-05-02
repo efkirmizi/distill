@@ -161,9 +161,9 @@ class CPConv2d(nn.Module):
 
         # Perform CP decomposition (fall back to random init if SVD fails)
         try:
-            cp_tensor = parafac(weight, rank=rank, init='svd', n_iter_max=100, tol=10e-5)
+            cp_tensor = parafac(weight, rank=rank, init='svd', n_iter_max=100, tol=1e-5)
         except Exception:
-            cp_tensor = parafac(weight, rank=rank, init='random', n_iter_max=100, tol=10e-5)
+            cp_tensor = parafac(weight, rank=rank, init='random', n_iter_max=100, tol=1e-5)
         cp_weights, (f_out, f_in, f_h, f_w) = cp_tensor
 
         # Absorb the CP scaling weights (lambda) into the output factor
@@ -224,9 +224,9 @@ class TuckerConv2d(nn.Module):
 
         # Perform Tucker decomposition (fall back to random init if SVD fails)
         try:
-            core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width], init='svd', n_iter_max=100, tol=10e-5)
+            core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width], init='svd', n_iter_max=100, tol=1e-5)
         except Exception:
-            core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width], init='random', n_iter_max=100, tol=10e-5)
+            core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width], init='random', n_iter_max=100, tol=1e-5)
         f_out, f_in, f_h, f_w = factors
 
         # Layer 1: Pointwise convolution (in_channels -> rank_in)

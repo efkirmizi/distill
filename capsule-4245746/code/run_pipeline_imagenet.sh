@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e  # Exit on any error
 
+# Suppress TensorFlow/TensorBoard C++ and oneDNN log noise
+export TF_CPP_MIN_LOG_LEVEL=3
+export TF_ENABLE_ONEDNN_OPTS=0
+
 mkdir -p ./save/logs
 mkdir -p ./save/hints
 mkdir -p ./save/models
@@ -98,7 +102,8 @@ if [ "$RUN_TEACHER" -eq 1 ]; then
         --learning_rate ${LR} \
         --weight_decay ${WEIGHT_DECAY} \
         --lr_decay_epochs 30,60,90 \
-        --num_workers ${NUM_WORKERS} >> "${LOG}" 2>&1 || { echo "ERROR: Teacher training failed. Check ${LOG}."; exit 1; }
+        --num_workers ${NUM_WORKERS} \
+        --trial ${TRIAL} >> "${LOG}" 2>&1 || { echo "ERROR: Teacher training failed. Check ${LOG}."; exit 1; }
 
     echo "Teacher training complete." >> "${LOG}"
 else
@@ -195,6 +200,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --cmtf_coupling_weight ${CMTF_COUPLING_WEIGHT} \
         --epochs ${STUDENT_EPOCHS} \
         --lr ${LR} \
+        --weight-decay ${WEIGHT_DECAY} \
         --batch-size ${BATCH} \
         --workers ${NUM_WORKERS} \
         --hint_points "${HINT_POINTS}" \

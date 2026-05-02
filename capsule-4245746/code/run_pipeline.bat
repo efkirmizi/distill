@@ -60,6 +60,24 @@ REM ============================================================
 set ENABLE_DYNAMIC_LOSS_WEIGHTS=1
 
 REM ============================================================
+REM PyTorch Compile Optimization (1=on, 0=off)
+REM ============================================================
+set ENABLE_TORCH_COMPILE=0
+
+REM ---- Derived flag strings (do not edit below this line) ----
+set TEACHER_FLAGS=
+if %ENABLE_TORCH_COMPILE% == 1 set TEACHER_FLAGS=--torch_compile
+
+set EXTRA_FLAGS=
+if %ENABLE_DYNAMIC_LOSS_WEIGHTS% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --dynamic_loss_weights
+if %ENABLE_VBMF% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --use_vbmf
+if %ENABLE_TORCH_COMPILE% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --torch_compile
+
+set EVAL_FLAGS=
+if %ENABLE_VBMF% == 1 set EVAL_FLAGS=%EVAL_FLAGS% --use_vbmf
+if %ENABLE_TORCH_COMPILE% == 1 set EVAL_FLAGS=%EVAL_FLAGS% --torch_compile
+
+REM ============================================================
 REM [1/5] Train Teacher
 REM ============================================================
 echo [1/5] Training Teacher (%MODEL_T%) on %DATASET%...
@@ -72,7 +90,7 @@ echo [1/5] Training Teacher (%MODEL_T%) on %DATASET%...
     --lr_decay_epochs %LR_DECAY_EPOCHS% ^
     --batch_size %BATCH% ^
     --num_workers %NUM_WORKERS% ^
-    --trial %TRIAL% >> "%LOG%" 2>&1
+    --trial %TRIAL% %TEACHER_FLAGS% >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: Teacher training failed. Check %LOG%.
     goto :error
@@ -152,15 +170,12 @@ set TRAIN_CMD=%PYTHON% train_student.py ^
     --cmtf_coupling_weight %CMTF_COUPLING_WEIGHT% ^
     --epochs %EPOCHS% ^
     --learning_rate %LEARNING_RATE% ^
+    --weight_decay %WEIGHT_DECAY% ^
     --lr_decay_epochs %LR_DECAY_EPOCHS% ^
     --batch_size %BATCH% ^
     --hint_points %HINT_POINTS% ^
     --num_workers %NUM_WORKERS% ^
     -r %GAMMA% -a %ALPHA% -b %BETA%
-
-set EXTRA_FLAGS=
-if %ENABLE_DYNAMIC_LOSS_WEIGHTS% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --dynamic_loss_weights
-if %ENABLE_VBMF% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --use_vbmf
 
 %TRAIN_CMD% %EXTRA_FLAGS% >> %LOG% 2>&1
 
@@ -176,9 +191,6 @@ echo [5/5] Running Evaluation Metrics...
 
 REM We must use delayed expansion (!HINT_POINTS!) because the hint variable is loaded dynamically
 set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODEL_T%_%DATASET%_pursuhint_cmtf_r-%GAMMA%_a-%ALPHA%_b-%BETA%_b2-1.0_%TRIAL%
-
-set EVAL_FLAGS=
-if %ENABLE_VBMF% == 1 set EVAL_FLAGS=%EVAL_FLAGS% --use_vbmf
 
 %PYTHON% evaluate_metrics.py ^
     --dataset %DATASET% ^
