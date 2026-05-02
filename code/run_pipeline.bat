@@ -14,7 +14,7 @@ if not exist ".\save\hints" mkdir ".\save\hints"
 if not exist ".\save\models" mkdir ".\save\models"
 if not exist ".\save\student_model" mkdir ".\save\student_model"
 
-set PYTHON=..\..\.venv\Scripts\python.exe
+set PYTHON=..\.venv\Scripts\python.exe
 set DATASET=cifar100
 set MODEL_T=wrn_40_2
 set MODEL_S=wrn_16_2
