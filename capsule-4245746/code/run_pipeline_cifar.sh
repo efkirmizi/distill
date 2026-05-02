@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e  # Exit on any error
 
+# Suppress TensorFlow/TensorBoard C++ and oneDNN log noise
+export TF_CPP_MIN_LOG_LEVEL=3
+export TF_ENABLE_ONEDNN_OPTS=0
+
 mkdir -p ./save/logs
 mkdir -p ./save/hints
 mkdir -p ./save/models
@@ -40,9 +44,19 @@ ALPHA=4.0
 BETA=25.0
 
 # CP / Tucker Rank Ratios and CMTF Rank
+# (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
 CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
 CMTF_RANK=8
+CMTF_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual CMTF
+
+# VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
+USE_VBMF=1
+if [ "$USE_VBMF" -eq 1 ]; then
+    VBMF_FLAG="--use_vbmf"
+else
+    VBMF_FLAG=""
+fi
 
 # PyTorch Compile Optimization ON/OFF
 ENABLE_TORCH_COMPILE=1
@@ -175,6 +189,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
         --cmtf_rank ${CMTF_RANK} \
+        --cmtf_coupling_weight ${CMTF_COUPLING_WEIGHT} \
         --epochs ${EPOCHS} \
         --learning_rate ${LR} \
         --lr_decay_epochs ${LR_DECAY_EPOCHS} \
@@ -182,7 +197,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --num_workers ${NUM_WORKERS} \
         --hint_points "${HINT_POINTS}" \
         -r ${GAMMA} -a ${ALPHA} -b ${BETA} \
-        ${TORCH_COMPILE} ${DYNAMIC_LOSS_WEIGHTS} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
+        ${VBMF_FLAG} ${TORCH_COMPILE} ${DYNAMIC_LOSS_WEIGHTS} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"
 else
@@ -208,7 +223,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_best_tucker.pth" \
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
-        ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
+        ${VBMF_FLAG} ${TORCH_COMPILE} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
     echo "[5/5] SKIPPED (RUN_EVALUATION=0)"
 fi

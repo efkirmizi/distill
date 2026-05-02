@@ -1,154 +1,90 @@
-import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import tensorly as tl
-from tensorly.decomposition import parafac
-
-tl.set_backend('pytorch')
 
 
 class CoupledTensorLoss(nn.Module):
     """
-    Coupled Matrix-Tensor Factorization (CMTF) Loss.
-    
-    Part 1 - Activation Matching: Aligns spatial attention maps at each hint point.
-    Part 2 - Structural Coupling: Decomposes teacher activations via CP, extracts
-             spatial latent signatures (R×R), and aligns them with the student's
-             structural weight factors obtained via get_factors().
+    CMTF-guided co-distillation loss with two parts:
+
+    Part 1 — Spatial Attention Matching (AT loss):
+        Aligns per-sample spatial attention maps between student and teacher
+        at each hint point. Sign of activations squared → channel-mean →
+        L2-normalised → MSE. Established, well-grounded signal.
+
+    Part 2 — Batch-Subspace Alignment:
+        Batch-unfolds each feature map into a B×(C·H·W) matrix and computes
+        the rank-R orthogonal projector P = U Uᵀ via truncated SVD.
+        Minimises ‖P_student − P_teacher‖_F².  Sign-invariant (projector is
+        unique); no ALS/parafac; gradients flow cleanly through svd_lowrank.
+
+    Coupling term (dual-student mode):
+        When coupling_proj is supplied (CP student's projectors, detached),
+        the Tucker student is additionally pulled toward the CP student's
+        batch subspace: coupling_weight · ‖P_tucker − P_cp‖_F².
+        This enforces a shared semantic latent space between architecturally
+        heterogeneous students without requiring matching channel/spatial dims.
     """
-    def __init__(self, model=None, rank=16, iter_max=100, **kwargs):
+
+    def __init__(self, rank=8, coupling_weight=1.0, **kwargs):
         super(CoupledTensorLoss, self).__init__()
         self.rank = rank
-        self.iter_max = iter_max
-        self.model = model
+        self.coupling_weight = coupling_weight
 
-        # Collect all structurally decomposed layers from the student model
-        self.decomposed_layers = []
-        if self.model is not None:
-            self._find_decomposed_layers(self.model)
-
-    def _find_decomposed_layers(self, module):
-        """Recursively find all CPConv2d / TuckerConv2d layers."""
-        # Unwrap DataParallel / torch.compile wrappers
-        if hasattr(module, 'module'):
-            module = module.module
-        if hasattr(module, '_orig_mod'):
-            module = module._orig_mod
-        for child in module.children():
-            if hasattr(child, 'get_factors') and callable(child.get_factors):
-                self.decomposed_layers.append(child)
-            else:
-                self._find_decomposed_layers(child)
-
-    def _frob_normalize(self, x):
-        """Normalize a matrix by its Frobenius norm."""
-        return x / (torch.norm(x, p='fro') + 1e-8)
-
-    def _extract_spatial_factors(self, layer):
+    def _projection(self, feat):
         """
-        Extract height and width spatial factor matrices (2D) from a decomposed layer.
+        Rank-R batch-mode orthogonal projector from a feature map.
 
-        CPConv2d.get_factors() returns:
-          [0] pointwise_in  (rank, C_in, 1, 1)
-          [1] depthwise_h   (rank, 1, kH, 1)   ← height spatial factor
-          [2] depthwise_w   (rank, 1, 1, kW)    ← width spatial factor
-          [3] pointwise_out (C_out, rank, 1, 1)
-
-        TuckerConv2d.get_factors() returns:
-          [0] pointwise_in  (rank_in, C_in, 1, 1)
-          [1] core_conv     (rank_out, rank_in, kH, kW)  ← spatial info baked in core
-          [2] pointwise_out (C_out, rank_out, 1, 1)
+        feat : B × C × H × W  (any shape with batch first)
+        returns : B × B  matrix  P = U Uᵀ,  where U holds the top-R left
+                  singular vectors of the batch-unfolded matrix B×(C·H·W).
         """
-        from decomposition import CPConv2d
-        factors = layer.get_factors()
+        B = feat.shape[0]
+        M = feat.reshape(B, -1).float()          # B × D, force fp32
+        q = min(self.rank, B, M.shape[1])
+        # svd_lowrank internally calls linalg.qr which is not implemented for fp16;
+        # disable autocast locally so internal matmuls stay in fp32.
+        with torch.amp.autocast('cuda', enabled=False):
+            U = torch.svd_lowrank(M, q=q)[0]     # B × q
+        return U @ U.t()                          # B × B
 
-        if isinstance(layer, CPConv2d):
-            # depthwise_h: (rank, 1, kH, 1) → squeeze → (rank, kH)
-            f_h = factors[1].squeeze()
-            # depthwise_w: (rank, 1, 1, kW) → squeeze → (rank, kW)
-            f_w = factors[2].squeeze()
-            # Handle edge case where squeeze collapses to 1D (rank=1 or kH=1)
-            if f_h.dim() == 1:
-                f_h = f_h.unsqueeze(0)
-            if f_w.dim() == 1:
-                f_w = f_w.unsqueeze(0)
-            return f_h, f_w  # both (rank, spatial_dim)
-        else:
-            # TuckerConv2d: extract spatial from core (rank_out, rank_in, kH, kW)
-            core = factors[1]
-            # Mode-2 unfolding for height: (kH, rank_out*rank_in*kW)
-            f_h = core.permute(2, 0, 1, 3).reshape(core.shape[2], -1).t()
-            # Mode-3 unfolding for width: (kW, rank_out*rank_in*kH)
-            f_w = core.permute(3, 0, 1, 2).reshape(core.shape[3], -1).t()
-            return f_h, f_w  # (features, spatial_dim)
-
-    def _align_and_compare(self, cov_a, cov_b):
+    def forward(self, f_s, f_t, coupling_proj=None):
         """
-        Compare two covariance matrices that may have different sizes.
-        Pools the larger one down to match the smaller, then computes MSE.
+        Args:
+            f_s           : list of student feature tensors, one per hint point
+            f_t           : list of teacher feature tensors, one per hint point
+            coupling_proj : list of B×B projection matrices from the CP student
+                            (detached).  When provided, adds coupling term to loss.
+
+        Returns:
+            loss : scalar distillation loss
+            proj : list of B×B batch-mode projectors for f_s, one per hint point.
+                   Pass these (detached) as coupling_proj to the Tucker student.
         """
-        if cov_a.shape == cov_b.shape:
-            return F.mse_loss(cov_a, cov_b)
+        device = f_s[0].device if f_s else torch.device('cpu')
+        loss = torch.zeros(1, device=device).squeeze()
+        proj = []
 
-        # Pool larger to smaller via adaptive_avg_pool2d
-        target_size = min(cov_a.shape[0], cov_b.shape[0])
-        if target_size < 2:
-            return torch.tensor(0.0, device=cov_a.device)
-
-        cov_a = F.adaptive_avg_pool2d(
-            cov_a.unsqueeze(0).unsqueeze(0), (target_size, target_size)
-        ).squeeze()
-        cov_b = F.adaptive_avg_pool2d(
-            cov_b.unsqueeze(0).unsqueeze(0), (target_size, target_size)
-        ).squeeze()
-
-        return F.mse_loss(self._frob_normalize(cov_a), self._frob_normalize(cov_b))
-
-    def forward(self, f_s, f_t):
-        loss = 0.0
-
-        # ═══ Part 1: Spatial Attention Matching at EACH hint point ═══
         for s, t in zip(f_s, f_t):
-            batch_size = s.shape[0]
-            if s.shape[2:] != t.shape[2:]:
-                s = F.adaptive_avg_pool2d(s, t.shape[2:])
+            B = s.shape[0]
 
-            s_attention = F.normalize(s.pow(2).mean(1).view(batch_size, -1), dim=1)
-            t_attention = F.normalize(t.pow(2).mean(1).view(batch_size, -1), dim=1)
-            loss += F.mse_loss(s_attention, t_attention)
+            # ── Part 1: Spatial Attention Matching ───────────────────────────
+            s_in = s
+            if s_in.shape[2:] != t.shape[2:]:
+                s_in = F.adaptive_avg_pool2d(s_in, t.shape[2:])
+            s_att = F.normalize(s_in.pow(2).mean(1).view(B, -1), dim=1)
+            t_att = F.normalize(t.pow(2).mean(1).view(B, -1), dim=1)
+            loss += F.mse_loss(s_att, t_att)
 
-        # ═══ Part 2: Structural Coupling (Weight Factors ↔ Activation Factors) ═══
-        if self.decomposed_layers and len(f_t) > 0:
-            # Decompose teacher activations at EACH hint point (not just the deepest)
-            for t_feat in f_t:
-                try:
-                    _, factors_t = parafac(
-                        t_feat, rank=self.rank, init='svd',
-                        n_iter_max=self.iter_max, tol=1e-4
-                    )
-                    # Spatial factors: Height (H, R) and Width (W, R)
-                    t_h, t_w = factors_t[2], factors_t[3]
+            # ── Part 2: Batch-Subspace Alignment ─────────────────────────────
+            P_t = self._projection(t.detach())    # no grad through teacher
+            P_s = self._projection(s)             # grads flow to student
+            loss += F.mse_loss(P_s, P_t)
+            proj.append(P_s)
 
-                    # Teacher latent signatures (R × R)
-                    cov_t_h = self._frob_normalize(torch.mm(t_h.t(), t_h))
-                    cov_t_w = self._frob_normalize(torch.mm(t_w.t(), t_w))
+        # ── Coupling term (Tucker ← CP, CP side detached) ────────────────────
+        if coupling_proj is not None:
+            for P_s, P_cp in zip(proj, coupling_proj):
+                loss += self.coupling_weight * F.mse_loss(P_s, P_cp)
 
-                    # Compare with each decomposed layer's weight spatial factors
-                    for layer in self.decomposed_layers:
-                        f_h, f_w = self._extract_spatial_factors(layer)
-
-                        # Student weight latent signatures (R_s × R_s)
-                        cov_w_h = self._frob_normalize(torch.mm(f_h, f_h.t()))
-                        cov_w_w = self._frob_normalize(torch.mm(f_w, f_w.t()))
-
-                        # Rank-agnostic comparison (handles R ≠ R_s)
-                        loss += self._align_and_compare(cov_w_h, cov_t_h)
-                        loss += self._align_and_compare(cov_w_w, cov_t_w)
-
-                except Exception as e:
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    warnings.warn(f"CMTF Part 2 (structural coupling) failed and was skipped: {e}", stacklevel=2)
-
-        return loss
+        return loss, proj

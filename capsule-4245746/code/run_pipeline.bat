@@ -1,5 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
+
+rem Suppress TensorFlow/TensorBoard C++ and oneDNN log noise
+set TF_CPP_MIN_LOG_LEVEL=3
+set TF_ENABLE_ONEDNN_OPTS=0
+
 echo ==========================================================================
 echo Starting FULL PURSUhInT + CMTF Pipeline (Teacher - Hints - Student - Eval)
 echo ==========================================================================
@@ -37,10 +42,17 @@ set BETA=25.0
 
 REM ============================================================
 REM CP / Tucker Rank Ratios and CMTF Rank
+REM (used when ENABLE_VBMF=0; ignored for rank selection when ENABLE_VBMF=1)
 REM ============================================================
 set CP_RANK_RATIO=0.5
 set TUCKER_RANK_RATIO=0.25
 set CMTF_RANK=8
+set CMTF_COUPLING_WEIGHT=1.0
+
+REM ============================================================
+REM VBMF automatic rank selection (1=on, 0=off)
+REM ============================================================
+set ENABLE_VBMF=1
 
 REM ============================================================
 REM Dynamic loss weighting (Kendall et al. CVPR 2018) ON/OFF
@@ -137,6 +149,7 @@ set TRAIN_CMD=%PYTHON% train_student.py ^
     --cp_rank_ratio %CP_RANK_RATIO% ^
     --tucker_rank_ratio %TUCKER_RANK_RATIO% ^
     --cmtf_rank %CMTF_RANK% ^
+    --cmtf_coupling_weight %CMTF_COUPLING_WEIGHT% ^
     --epochs %EPOCHS% ^
     --learning_rate %LEARNING_RATE% ^
     --lr_decay_epochs %LR_DECAY_EPOCHS% ^
@@ -145,11 +158,11 @@ set TRAIN_CMD=%PYTHON% train_student.py ^
     --num_workers %NUM_WORKERS% ^
     -r %GAMMA% -a %ALPHA% -b %BETA%
 
-if %ENABLE_DYNAMIC_LOSS_WEIGHTS% == 1 (
-    %TRAIN_CMD% --dynamic_loss_weights >> %LOG% 2>&1
-) else (
-    %TRAIN_CMD% >> %LOG% 2>&1
-)
+set EXTRA_FLAGS=
+if %ENABLE_DYNAMIC_LOSS_WEIGHTS% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --dynamic_loss_weights
+if %ENABLE_VBMF% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --use_vbmf
+
+%TRAIN_CMD% %EXTRA_FLAGS% >> %LOG% 2>&1
 
 if errorlevel 1 (
     echo ERROR: Student training failed. Check %LOG%.
@@ -164,6 +177,9 @@ echo [5/5] Running Evaluation Metrics...
 REM We must use delayed expansion (!HINT_POINTS!) because the hint variable is loaded dynamically
 set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODEL_T%_%DATASET%_pursuhint_cmtf_r-%GAMMA%_a-%ALPHA%_b-%BETA%_b2-1.0_%TRIAL%
 
+set EVAL_FLAGS=
+if %ENABLE_VBMF% == 1 set EVAL_FLAGS=%EVAL_FLAGS% --use_vbmf
+
 %PYTHON% evaluate_metrics.py ^
     --dataset %DATASET% ^
     --model_t %MODEL_T% ^
@@ -172,7 +188,7 @@ set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODE
     --path_s_cp "!STUDENT_DIR!\%MODEL_S%_best_cp.pth" ^
     --path_s_tucker "!STUDENT_DIR!\%MODEL_S%_best_tucker.pth" ^
     --cp_rank_ratio %CP_RANK_RATIO% ^
-    --tucker_rank_ratio %TUCKER_RANK_RATIO% >> %LOG% 2>&1
+    --tucker_rank_ratio %TUCKER_RANK_RATIO% %EVAL_FLAGS% >> %LOG% 2>&1
 
 if errorlevel 1 (
     echo WARNING: Evaluation failed. Check %LOG%.

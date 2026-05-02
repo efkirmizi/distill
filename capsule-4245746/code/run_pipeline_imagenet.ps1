@@ -54,9 +54,14 @@ $ALPHA = "4.0"
 $BETA = "25.0"
 
 # CP / Tucker Rank Ratios and CMTF Rank
+# (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
 $CP_RANK_RATIO = 0.5
 $TUCKER_RANK_RATIO = 0.25
 $CMTF_RANK = 8
+$CMTF_COUPLING_WEIGHT = 1.0       # weight for Tucker←CP coupling term in dual CMTF
+
+# VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
+$USE_VBMF = 1
 
 # Log file
 $LOG_DIR = ".\save\logs"
@@ -196,6 +201,7 @@ if ($RUN_TRAINING -eq 1) {
         "--cp_rank_ratio", $CP_RANK_RATIO,
         "--tucker_rank_ratio", $TUCKER_RANK_RATIO,
         "--cmtf_rank", $CMTF_RANK,
+        "--cmtf_coupling_weight", $CMTF_COUPLING_WEIGHT,
         "--epochs", $STUDENT_EPOCHS,
         "--lr", $LR,
         "--batch-size", $BATCH,
@@ -214,6 +220,11 @@ if ($RUN_TRAINING -eq 1) {
     if ($ENABLE_DYNAMIC_LOSS_WEIGHTS -eq 1) {
         $TRAIN_ARGS += "--dynamic_loss_weights"
         Write-Host "  Dynamic loss weighting enabled (Kendall et al.)"
+    }
+
+    if ($USE_VBMF -eq 1) {
+        $TRAIN_ARGS += "--use_vbmf"
+        Write-Host "  VBMF rank selection enabled (teacher weight spectrum)"
     }
 
     $TRAIN_ARGS += $IMAGENET_DIR
@@ -240,15 +251,20 @@ if ($RUN_EVALUATION -eq 1) {
 
     $STUDENT_DIR = ".\save\student_model\imagenet100\${HINT_POINTS}\S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_cmtf_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
 
-    & $PYTHON evaluate_metrics.py `
-        --dataset $DATASET `
-        --model_t $MODEL_T `
-        --path_t $TEACHER_PATH `
-        --model_s $MODEL_S `
-        --path_s_cp "$STUDENT_DIR\${MODEL_S}_best_cp.pth" `
-        --path_s_tucker "$STUDENT_DIR\${MODEL_S}_best_tucker.pth" `
-        --cp_rank_ratio $CP_RANK_RATIO `
-        --tucker_rank_ratio $TUCKER_RANK_RATIO *>> $LOG
+    $EVAL_ARGS = @(
+        "evaluate_metrics.py",
+        "--dataset", $DATASET,
+        "--model_t", $MODEL_T,
+        "--path_t", $TEACHER_PATH,
+        "--model_s", $MODEL_S,
+        "--path_s_cp", "$STUDENT_DIR\${MODEL_S}_best_cp.pth",
+        "--path_s_tucker", "$STUDENT_DIR\${MODEL_S}_best_tucker.pth",
+        "--cp_rank_ratio", $CP_RANK_RATIO,
+        "--tucker_rank_ratio", $TUCKER_RANK_RATIO
+    )
+    if ($USE_VBMF -eq 1) { $EVAL_ARGS += "--use_vbmf" }
+
+    & $PYTHON $EVAL_ARGS *>> $LOG
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARNING: Evaluation failed. Check $LOG." -ForegroundColor Yellow

@@ -56,16 +56,26 @@ def parse_option():
                         help='path to Tucker-decomposed student checkpoint')
     parser.add_argument('--tucker_rank_ratio', type=float, default=0.5,
                         help='Tucker rank ratio used during training')
+    parser.add_argument('--use_vbmf', action='store_true',
+                        help='reconstruct decomposed students using teacher-VBMF ranks (must match training)')
 
     # PyTorch model compile optimization
     parser.add_argument('--torch_compile', action='store_true')
 
     # Output
     parser.add_argument('--save_path', type=str,
-                        default='./save/evaluation_results.json',
-                        help='where to save JSON results')
+                        default=None,
+                        help='where to save JSON results (default: same dir as --path_s_cp or --path_s_tucker)')
 
     opt = parser.parse_args()
+
+    if opt.save_path is None:
+        ref = opt.path_s_cp or opt.path_s_tucker
+        if ref:
+            opt.save_path = os.path.join(os.path.dirname(ref), 'evaluation_results.json')
+        else:
+            opt.save_path = './save/evaluation_results.json'
+
     return opt
 
 
@@ -220,13 +230,16 @@ def evaluate():
     if opt.path_s_cp:
         print(f"\n--- Evaluating Student (CP): {opt.model_s} ---")
         student_cp = model_dict[opt.model_s](num_classes=n_cls)
-        student_cp = decompose_model(student_cp, method='cp', cp_rank_ratio=opt.cp_rank_ratio)
+        student_cp = decompose_model(student_cp, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
+                                     use_vbmf=opt.use_vbmf,
+                                     teacher_model=teacher if opt.use_vbmf else None)
         student_cp = load_checkpoint(student_cp, opt.path_s_cp)
         if torch.cuda.is_available():
             student_cp = student_cp.cuda()
 
+        rank_desc = "VBMF" if opt.use_vbmf else f"r={opt.cp_rank_ratio}"
         cp_result = evaluate_model(student_cp,
-                                    f"Student CP ({opt.model_s}, r={opt.cp_rank_ratio})",
+                                    f"Student CP ({opt.model_s}, {rank_desc})",
                                     val_loader, criterion, opt, device)
         results.append(cp_result)
 
@@ -234,13 +247,16 @@ def evaluate():
     if opt.path_s_tucker:
         print(f"\n--- Evaluating Student (Tucker): {opt.model_s} ---")
         student_tk = model_dict[opt.model_s](num_classes=n_cls)
-        student_tk = decompose_model(student_tk, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio)
+        student_tk = decompose_model(student_tk, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio,
+                                     use_vbmf=opt.use_vbmf,
+                                     teacher_model=teacher if opt.use_vbmf else None)
         student_tk = load_checkpoint(student_tk, opt.path_s_tucker)
         if torch.cuda.is_available():
             student_tk = student_tk.cuda()
 
+        t_rank_desc = "VBMF" if opt.use_vbmf else f"r={opt.tucker_rank_ratio}"
         tk_result = evaluate_model(student_tk,
-                                    f"Student Tucker ({opt.model_s}, r={opt.tucker_rank_ratio})",
+                                    f"Student Tucker ({opt.model_s}, {t_rank_desc})",
                                     val_loader, criterion, opt, device)
         results.append(tk_result)
 

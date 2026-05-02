@@ -3,6 +3,7 @@ from __future__ import print_function, division
 import sys
 import time
 import torch
+import torch.nn.functional as F
 import numpy as np
 import math
 from .util import AverageMeter, accuracy
@@ -158,6 +159,8 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             if opt.distill in ['crd'] or opt.distill == 'WSL_crd'  or opt.distill == 'ATT_crd':
                 contrast_idx = contrast_idx.cuda()
 
+        proj_cp = None  # CP student's batch projectors, passed to Tucker for coupling
+
         # ===================forward CP student=====================
         preact = False
         with torch.amp.autocast('cuda', enabled=scaler is not None):
@@ -231,12 +234,23 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             elif opt.distill == 'pursuhint_cmtf':
                 f_s = feat_s
                 f_t = feat_t
-                # Disable autocast for CMTF: parafac() uses FP64 ALS internally
-                with torch.amp.autocast('cuda', enabled=False):
-                    loss_kd = criterion_kd(
-                        [f.float() for f in f_s],
-                        [f.float() for f in f_t]
+                loss_kd, proj_cp = criterion_kd(
+                    [f.float() for f in f_s],
+                    [f.float() for f in f_t]
+                )
+                if dual:
+                    feat_s2, logit_s2 = model_s2(input, is_feat=True, preact=preact)
+                    feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
+                    loss_cls_2 = criterion_cls_2(logit_s2, target)
+                    loss_div_2 = criterion_div_2(logit_s2, logit_t)
+                    loss_kd_2, proj_tucker = criterion_kd_2(
+                        [f.float() for f in feat_s2],
+                        [f.float() for f in feat_t]
                     )
+                    cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
+                    for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
+                        loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
+                        loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
             else:
                 raise NotImplementedError(opt.distill)
 
@@ -262,24 +276,30 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         else:
             loss.backward()
             optimizer.step()
-        if dual:
-            torch.cuda.empty_cache()
 
         # ===================forward+backward Tucker student (dual mode)=====================
         if dual:
-            with torch.amp.autocast('cuda', enabled=scaler_2 is not None):
-                feat_s2, logit_s2 = model_s2(input, is_feat=True, preact=preact)
-                feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
+            if opt.distill != 'pursuhint_cmtf':
+                with torch.amp.autocast('cuda', enabled=scaler_2 is not None):
+                    feat_s2, logit_s2 = model_s2(input, is_feat=True, preact=preact)
+                    feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
 
-                loss_cls_2 = criterion_cls_2(logit_s2, target)
-                loss_div_2 = criterion_div_2(logit_s2, logit_t)
+                    loss_cls_2 = criterion_cls_2(logit_s2, target)
+                    loss_div_2 = criterion_div_2(logit_s2, logit_t)
 
-                # Disable autocast for CMTF: parafac() uses FP64 ALS internally
-                with torch.amp.autocast('cuda', enabled=False):
                     loss_kd_2 = criterion_kd_2(
                         [f.float() for f in feat_s2],
-                        [f.float() for f in feat_t]
+                        [f.float() for f in feat_t],
                     )
+                    if isinstance(loss_kd_2, (tuple, list)):
+                        loss_kd_2 = loss_kd_2[0]
+                    if loss_weighter_2 is not None:
+                        loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
+                    else:
+                        loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
+            else:
+                # pursuhint_cmtf: Tucker forward + bidirectional coupling already done inside the
+                # CP autocast block above; loss_cls_2, loss_div_2, loss_kd_2 are already set.
                 if loss_weighter_2 is not None:
                     loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
                 else:

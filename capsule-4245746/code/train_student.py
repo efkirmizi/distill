@@ -20,6 +20,7 @@ import tensorboard_logger as tb_logger
 import math
 import numpy as np
 import random
+import psutil
 
 from models import model_dict
 from models.util import Embed, ConvReg, LinearEmbed
@@ -89,7 +90,12 @@ def parse_option():
     parser.add_argument('--trial', type=str, default='1', help='trial id')
     parser.add_argument('--cp_rank_ratio', type=float, default=0.5, help='compression ratio for CP')
     parser.add_argument('--tucker_rank_ratio', type=float, default=0.5, help='compression ratio for Tucker')
-    parser.add_argument('--cmtf_rank', type=int, default=8, help='rank for Coupled Tensor Loss')
+    parser.add_argument('--use_vbmf', action='store_true',
+                        help='auto-select decomposition rank per layer via EVBMF instead of global ratio')
+    parser.add_argument('--cmtf_rank', type=int, default=8,
+                        help='SVD rank R for batch-subspace alignment in CMTF loss')
+    parser.add_argument('--cmtf_coupling_weight', type=float, default=1.0,
+                        help='weight for the Tucker←CP coupling term in dual CMTF mode')
 
     parser.add_argument('-r', '--gamma', type=float, default=1, help='weight for classification')
     parser.add_argument('-a', '--alpha', type=float, default=None, help='weight balance for KD')
@@ -242,11 +248,17 @@ def main():
         model_s2 = copy.deepcopy(model_s)
 
     if opt.distill == 'pursuhint_cmtf':
-        print(f"==> Decomposing student model structurally using CP factorization (ratio: {opt.cp_rank_ratio})...")
-        model_s = decompose_model(model_s, method='cp', cp_rank_ratio=opt.cp_rank_ratio)
+        _teacher_for_vbmf = model_t if opt.use_vbmf else None
+        rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.cp_rank_ratio}"
+        print(f"==> Decomposing student model with CP factorization ({rank_desc})...")
+        model_s = decompose_model(model_s, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
+                                  use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf)
         if opt.dual_cmtf:
-            print(f"==> Decomposing parallel student model using Tucker factorization (ratio: {opt.tucker_rank_ratio})...")
-            model_s2 = decompose_model(model_s2, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio)
+            t_rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.tucker_rank_ratio}"
+            print(f"==> Decomposing parallel student model with Tucker ({t_rank_desc})...")
+            model_s2 = decompose_model(model_s2, method='tucker',
+                                       tucker_rank_ratio=opt.tucker_rank_ratio,
+                                       use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf)
     
     # ---- Wrap in DataParallel FIRST ----
     model_s = nn.DataParallel(model_s).cuda()
@@ -405,9 +417,10 @@ def main():
         trainable_list.append(criterion_kd)
     elif opt.distill == 'pursuhint_cmtf':
         # Pass the specific model so the loss function can call .get_factors() internally
-        criterion_kd = CoupledTensorLoss(model=model_s, rank=opt.cmtf_rank, iter_max=100)
+        criterion_kd = CoupledTensorLoss(rank=opt.cmtf_rank)
         if opt.dual_cmtf:
-            criterion_kd_2 = CoupledTensorLoss(model=model_s2, rank=opt.cmtf_rank, iter_max=100)
+            criterion_kd_2 = CoupledTensorLoss(rank=opt.cmtf_rank,
+                                               coupling_weight=opt.cmtf_coupling_weight)
     else:
         raise NotImplementedError(opt.distill)
 
@@ -429,6 +442,8 @@ def main():
     loss_weighter = None
     loss_weighter_2 = None
     if opt.dynamic_loss_weights:
+        if opt.gamma != 1.0 or opt.alpha != 1.0 or opt.beta != 1.0:
+            print(f"WARNING: --dynamic_loss_weights is ON; --gamma/--alpha/--beta ({opt.gamma}/{opt.alpha}/{opt.beta}) are ignored.")
         loss_weighter = DynamicLossWeighter(num_losses=3)
         if opt.dual_cmtf:
             loss_weighter_2 = DynamicLossWeighter(num_losses=3)
@@ -506,10 +521,12 @@ def main():
         del _probe, _feats
 
     _total_cache_gb = (_feat_bytes + n_data * n_cls * 4) / 1024 ** 3
-    _CACHE_LIMIT_GB = 4.0
+    _available_gb = psutil.virtual_memory().available / 1024 ** 3
+    _CACHE_LIMIT_GB = _available_gb * 0.75
 
     if _total_cache_gb > _CACHE_LIMIT_GB:
-        print(f"==> Cache would need {_total_cache_gb:.1f} GB — "
+        print(f"==> Cache would need {_total_cache_gb:.1f} GB but only "
+              f"{_available_gb:.1f} GB RAM available; "
               f"teacher features computed on-the-fly (no RAM overhead).")
         teacher_cache = None
     else:
@@ -747,6 +764,7 @@ def main():
         'alpha': opt.alpha,
         'beta': opt.beta,
         'cp_rank_ratio': opt.cp_rank_ratio,
+        'use_vbmf': opt.use_vbmf,
         'best_acc_cp': round(_f(best_acc), 4),
     }
     if opt.dynamic_loss_weights and loss_weighter is not None:

@@ -43,9 +43,19 @@ ALPHA=4.0
 BETA=25.0
 
 # CP / Tucker Rank Ratios and CMTF Rank
+# (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
 CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
 CMTF_RANK=8
+CMTF_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual CMTF
+
+# VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
+USE_VBMF=0
+if [ "$USE_VBMF" -eq 1 ]; then
+    VBMF_FLAG="--use_vbmf"
+else
+    VBMF_FLAG=""
+fi
 
 # Log file
 LOG_DIR="./save/logs"
@@ -182,6 +192,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
         --cmtf_rank ${CMTF_RANK} \
+        --cmtf_coupling_weight ${CMTF_COUPLING_WEIGHT} \
         --epochs ${STUDENT_EPOCHS} \
         --lr ${LR} \
         --batch-size ${BATCH} \
@@ -190,7 +201,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --gamma ${GAMMA} \
         --alpha ${ALPHA} \
         --beta ${BETA} \
-        ${DALI_FLAG} \
+        ${VBMF_FLAG} ${DALI_FLAG} \
         ${DYNAMIC_LOSS_WEIGHTS} \
         "${IMAGENET_DIR}" >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
@@ -216,7 +227,8 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
         --path_s_cp "${STUDENT_DIR}/${MODEL_S}_best_cp.pth" \
         --path_s_tucker "${STUDENT_DIR}/${MODEL_S}_best_tucker.pth" \
         --cp_rank_ratio ${CP_RANK_RATIO} \
-        --tucker_rank_ratio ${TUCKER_RANK_RATIO} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
+        --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
+        ${VBMF_FLAG} >> "${LOG}" 2>&1 || { echo "WARNING: Evaluation failed. Check ${LOG}."; }
 else
     echo "[5/5] SKIPPED (RUN_EVALUATION=0)"
 fi

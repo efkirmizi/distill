@@ -129,8 +129,12 @@ def parse():
                         help='compression ratio for CP decomposition')
     parser.add_argument('--tucker_rank_ratio', type=float, default=0.5,
                         help='compression ratio for Tucker decomposition')
+    parser.add_argument('--use_vbmf', action='store_true',
+                        help='auto-select decomposition rank per layer via EVBMF instead of global ratio')
     parser.add_argument('--cmtf_rank', type=int, default=8,
-                        help='rank for Coupled Tensor Loss')
+                        help='SVD rank R for batch-subspace alignment in CMTF loss')
+    parser.add_argument('--cmtf_coupling_weight', type=float, default=1.0,
+                        help='weight for the Tucker←CP coupling term in dual CMTF mode')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -416,6 +420,12 @@ def main():
 
     n_cls = 100
 
+    # ---- Load teacher first (needed for VBMF rank selection before decomposition) ----
+    teacher = None
+    if args.distill is not None:
+        teacher = load_teacher(args.path_t, n_cls, args.model_t)
+        teacher.eval()
+
     # ---- Create student model ----
     model_s = model_dict[args.model_s](num_classes=n_cls)
 
@@ -424,12 +434,17 @@ def main():
 
     # ---- Model decomposition for pursuhint_cmtf ----
     if args.distill == 'pursuhint_cmtf':
-        print(f"==> Decomposing student with CP factorization (ratio: {args.cp_rank_ratio})...")
-        model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio)
+        _teacher_for_vbmf = teacher if args.use_vbmf else None
+        rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
+        print(f"==> Decomposing student with CP factorization ({rank_desc})...")
+        model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
+                                  use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf)
         if args.dual_cmtf:
-            print(f"==> Decomposing parallel student with Tucker (ratio: {args.tucker_rank_ratio})...")
+            t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
+            print(f"==> Decomposing parallel student with Tucker ({t_rank_desc})...")
             model_s2 = decompose_model(model_s2, method='tucker',
-                                       tucker_rank_ratio=args.tucker_rank_ratio)
+                                       tucker_rank_ratio=args.tucker_rank_ratio,
+                                       use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf)
 
     if args.sync_bn:
         print("using apex synced BN")
@@ -444,11 +459,9 @@ def main():
     if args.dual_cmtf:
         model_s2 = model_s2.cuda()
 
-    # ---- Load teacher (only if doing distillation) ----
-    teacher = None
-    if args.distill is not None:
-        teacher = load_teacher(args.path_t, n_cls, args.model_t).cuda()
-        teacher.eval()
+    # Move teacher to GPU after decomposition (VBMF runs on CPU)
+    if teacher is not None:
+        teacher = teacher.cuda()
 
     # ---- Build module_list / trainable_list / criterion_list ----
     module_list = nn.ModuleList([model_s])
@@ -506,9 +519,10 @@ def main():
             criterion_kd = Attention()
 
         elif args.distill == 'pursuhint_cmtf':
-            criterion_kd = CoupledTensorLoss(model=model_s, rank=args.cmtf_rank, iter_max=100)
+            criterion_kd = CoupledTensorLoss(rank=args.cmtf_rank)
             if args.dual_cmtf:
-                criterion_kd_2 = CoupledTensorLoss(model=model_s2, rank=args.cmtf_rank, iter_max=100)
+                criterion_kd_2 = CoupledTensorLoss(rank=args.cmtf_rank,
+                                                   coupling_weight=args.cmtf_coupling_weight)
 
         else:
             raise NotImplementedError(args.distill)
@@ -880,6 +894,7 @@ def main():
     }
     if args.distill == 'pursuhint_cmtf':
         summary['cp_rank_ratio'] = args.cp_rank_ratio
+        summary['use_vbmf'] = args.use_vbmf
     if args.dynamic_loss_weights and loss_weighter is not None:
         summary['dynamic_loss_weights'] = True
         w = loss_weighter.effective_weights()
@@ -1020,13 +1035,30 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         loss_cls = criterion_cls(logit_s, target)
         loss_div = criterion_div(logit_s, logit_t, target) if args.distill == 'WSL_att' else criterion_div(logit_s, logit_t)
 
+        proj_cp = None
         if args.distill == 'kd': loss_kd = torch.tensor(0.0, device=inp.device)
         elif args.distill == 'hint':
             f_s = [module_list[1 + j](feat_s[j]) for j in range(len(feat_s))]
             loss_kd = criterion_kd(f_s, feat_t)
         elif args.distill in ['attention', 'WSL_att']: loss_kd = sum(criterion_kd(feat_s, feat_t))
         elif args.distill == 'vid': loss_kd = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s, feat_t, criterion_kd)])
-        elif args.distill == 'pursuhint_cmtf': loss_kd = criterion_kd(feat_s, feat_t)
+        elif args.distill == 'pursuhint_cmtf':
+            loss_kd, proj_cp = criterion_kd(
+                [f.float() for f in feat_s],
+                [f.float() for f in feat_t]
+            )
+            if dual:
+                feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
+                loss_cls_2 = criterion_cls_2(logit_s2, target)
+                loss_div_2 = criterion_div_2(logit_s2, logit_t)
+                loss_kd_2, proj_tucker = criterion_kd_2(
+                    [f.float() for f in feat_s2],
+                    [f.float() for f in feat_t]
+                )
+                cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
+                for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
+                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
+                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
         else: raise NotImplementedError(args.distill)
 
         if loss_weighter is not None:
@@ -1043,17 +1075,21 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         losses_cls.update(loss_cls.item(), inp.size(0))
         losses_div.update(loss_div.item(), inp.size(0))
         losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
-        if dual:
-            torch.cuda.empty_cache()
 
         # ---- Process Tucker Student ----
         if dual:
-            feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
-            loss_cls_2 = criterion_cls_2(logit_s2, target)
-            loss_div_2 = criterion_div_2(logit_s2, logit_t, target) if args.distill == 'WSL_att' else criterion_div_2(logit_s2, logit_t)
-            
-            # Tucker is currently only designed to be used with pursuhint_cmtf
-            loss_kd_2 = criterion_kd_2(feat_s2, feat_t) 
+            if args.distill != 'pursuhint_cmtf':
+                feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
+                loss_cls_2 = criterion_cls_2(logit_s2, target)
+                loss_div_2 = criterion_div_2(logit_s2, logit_t, target) if args.distill == 'WSL_att' else criterion_div_2(logit_s2, logit_t)
+
+                coupling = [p.detach() for p in proj_cp] if proj_cp is not None else None
+                loss_kd_2, _ = criterion_kd_2(
+                    [f.float() for f in feat_s2],
+                    [f.float() for f in feat_t],
+                    coupling_proj=coupling
+                )
+
             if loss_weighter_2 is not None:
                 loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
             else:
