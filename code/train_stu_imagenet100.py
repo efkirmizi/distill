@@ -445,6 +445,7 @@ def main():
         model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
                                   use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
                                   device='cuda')
+        model_s.cuda()  # move BN/Linear/remaining non-Conv2d layers that decompose_model skipped
         gc.collect()
         if args.dual_cmtf:
             t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
@@ -453,6 +454,7 @@ def main():
                                        tucker_rank_ratio=args.tucker_rank_ratio,
                                        use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
                                        device='cuda')
+            model_s2.cuda()  # same for Tucker student
             gc.collect()
 
     if args.sync_bn:
