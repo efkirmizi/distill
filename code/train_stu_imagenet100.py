@@ -24,6 +24,7 @@ Usage examples:
 from __future__ import print_function
 
 import argparse
+import gc
 import os
 import shutil
 import time
@@ -443,24 +444,29 @@ def main():
         print(f"==> Decomposing student with CP factorization ({rank_desc})...")
         model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
                                   use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf)
+        model_s = model_s.cuda()
+        gc.collect()
         if args.dual_cmtf:
             t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
             print(f"==> Decomposing parallel student with Tucker ({t_rank_desc})...")
             model_s2 = decompose_model(model_s2, method='tucker',
                                        tucker_rank_ratio=args.tucker_rank_ratio,
                                        use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf)
+            model_s2 = model_s2.cuda()
+            gc.collect()
 
     if args.sync_bn:
         print("using apex synced BN")
         model_s = parallel.convert_syncbn_model(model_s)
 
-    if hasattr(torch, 'channels_last') and hasattr(torch, 'contiguous_format'):
-        memory_format = torch.channels_last if args.channels_last else torch.contiguous_format
-        model_s = model_s.cuda().to(memory_format=memory_format)
-    else:
-        model_s = model_s.cuda()
+    if not next(model_s.parameters()).is_cuda:
+        if hasattr(torch, 'channels_last') and hasattr(torch, 'contiguous_format'):
+            memory_format = torch.channels_last if args.channels_last else torch.contiguous_format
+            model_s = model_s.cuda().to(memory_format=memory_format)
+        else:
+            model_s = model_s.cuda()
 
-    if args.dual_cmtf:
+    if args.dual_cmtf and not next(model_s2.parameters()).is_cuda:
         model_s2 = model_s2.cuda()
 
     # Move teacher to GPU after decomposition (VBMF runs on CPU)

@@ -14,7 +14,6 @@ import argparse
 import sys
 import json
 import os
-import copy
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -137,9 +136,9 @@ def evaluate_model(model, model_name, val_loader, criterion, opt, device):
     
     # --- 1. Efficiency (on CPU, UNCOMPILED) ---
     # We MUST run THOP on a clean, uncompiled CPU model, otherwise thop.profile will crash.
-    model_cpu = copy.deepcopy(model).cpu()
-    model_cpu.eval()
-    params, macs, latency = measure_model(model_cpu, dataset=opt.dataset, device='cpu')
+    model.cpu()
+    model.eval()
+    params, macs, latency = measure_model(model, dataset=opt.dataset, device='cpu')
     macs_str, params_str = clever_format([macs, params], "%.3f")
 
     # --- 2. Compile for Speed ---

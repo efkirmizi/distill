@@ -1,3 +1,4 @@
+import gc
 import torch
 import torch.nn as nn
 import tensorly as tl
@@ -195,6 +196,9 @@ class CPConv2d(nn.Module):
         if layer.bias is not None:
             self.pointwise_out.bias.data = layer.bias.data
 
+        del cp_tensor, cp_weights, f_out, f_in, f_h, f_w
+        gc.collect()
+
     def forward(self, x):
         x = self.pointwise_in(x)
         x = self.depthwise_h(x)
@@ -249,6 +253,9 @@ class TuckerConv2d(nn.Module):
         
         if layer.bias is not None:
             self.pointwise_out.bias.data = layer.bias.data
+
+        del core, factors, f_out, f_in, f_h, f_w, core_spatial
+        gc.collect()
 
     def forward(self, x):
         x = self.pointwise_in(x)
@@ -308,6 +315,7 @@ def decompose_model(model, method='cp', cp_rank_ratio=0.5, tucker_rank_ratio=0.5
                     rank = max(int(max(out_channels, in_channels) * cp_rank_ratio), 1)
                     rank = min(rank, max(max_rank, 1))
                 new_module = CPConv2d(module, rank)
+                gc.collect()
 
             elif method == 'tucker':
                 if use_vbmf:
@@ -322,6 +330,7 @@ def decompose_model(model, method='cp', cp_rank_ratio=0.5, tucker_rank_ratio=0.5
                     rank_out = max(int(out_channels * tucker_rank_ratio), min(4, out_channels))
                     rank_in = max(int(in_channels * tucker_rank_ratio), min(4, in_channels))
                 new_module = TuckerConv2d(module, [rank_out, rank_in])
+                gc.collect()
 
             else:
                 raise ValueError(f"Unknown decomposition method: {method}")

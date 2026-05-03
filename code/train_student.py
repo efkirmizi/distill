@@ -4,6 +4,7 @@ the general training framework for CIFAR experiments
 
 from __future__ import print_function
 
+import gc
 import os
 import argparse
 import time
@@ -256,17 +257,22 @@ def main():
         print(f"==> Decomposing student model with CP factorization ({rank_desc})...")
         model_s = decompose_model(model_s, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
                                   use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf)
+        model_s = nn.DataParallel(model_s).cuda()
+        gc.collect()
         if opt.dual_cmtf:
             t_rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.tucker_rank_ratio}"
             print(f"==> Decomposing parallel student model with Tucker ({t_rank_desc})...")
             model_s2 = decompose_model(model_s2, method='tucker',
                                        tucker_rank_ratio=opt.tucker_rank_ratio,
                                        use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf)
-    
+            model_s2 = nn.DataParallel(model_s2).cuda()
+            gc.collect()
+
     # ---- Wrap in DataParallel FIRST ----
-    model_s = nn.DataParallel(model_s).cuda()
+    if not next(model_s.parameters()).is_cuda:
+        model_s = nn.DataParallel(model_s).cuda()
     model_t = nn.DataParallel(model_t).cuda()
-    if opt.dual_cmtf:
+    if opt.dual_cmtf and not next(model_s2.parameters()).is_cuda:
         model_s2 = nn.DataParallel(model_s2).cuda()
 
     # ---- Compile AFTER DataParallel ----

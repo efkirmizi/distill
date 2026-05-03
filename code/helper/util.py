@@ -19,7 +19,8 @@ def adjust_learning_rate(epoch, opt, optimizer):
     if steps > 0:
         new_lr = opt.learning_rate * (opt.lr_decay_rate ** steps)
         for param_group in optimizer.param_groups:
-            param_group['lr'] = new_lr
+            if not param_group.get('fix_lr', False):
+                param_group['lr'] = new_lr
 
 def adjust_learning_rate_with_warmup(epoch, opt, optimizer, warmup_epochs=5):
     """Step decay with a 5-epoch linear warmup specifically for factorized models."""

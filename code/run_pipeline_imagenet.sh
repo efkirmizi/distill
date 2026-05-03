@@ -62,7 +62,7 @@ else
 fi
 
 # PyTorch Compile Optimization ON/OFF (disabled by default for DDP)
-ENABLE_TORCH_COMPILE=1
+ENABLE_TORCH_COMPILE=1  # decomposed models have 3-4x more layers; compile can OOMs on CPU RAM
 if [ "$ENABLE_TORCH_COMPILE" -eq 1 ]; then
     TORCH_COMPILE="--torch_compile"
 else

@@ -70,9 +70,10 @@ class KMeans:
             self.indices_h = {j: [] for j in range(self.k)}
 
             # Assignment step: assign each layer to nearest centroid
+            centroid_reprs = {c: data[self.centroids[c]] for c in self.centroids}
             for index_h in range(self.num_all_layers):
                 data_h = data[index_h]
-                distances = [self.distance_metric(data_h, data[self.centroids[c]]) for c in self.centroids]
+                distances = [self.distance_metric(data_h, centroid_reprs[c]) for c in self.centroids]
                 classification = int(np.argmin(distances))
                 self.classifications[classification].append(data_h)
                 self.indices_h[classification].append(index_h)

@@ -27,13 +27,17 @@ fi
 mkdir -p "./data"
 
 # ── 2. Download and Extract ───────────────────────────────────────────────────
-echo "==> Downloading ImageNet100 from Kaggle..."
-kaggle datasets download -d "$DATASET_SLUG" -p "./data"
+if [ ! -f "$ZIP_FILE" ]; then
+    echo "==> Downloading ImageNet100 from Kaggle..."
+    kaggle datasets download -d "$DATASET_SLUG" -p "./data"
+else
+    echo "==> Zip file already exists on disk. Skipping download!"
+fi
 
 if [ -f "$ZIP_FILE" ]; then
-    echo "==> Extracting archive..."
+    echo "==> Extracting archive directly into RAM (/dev/shm)..."
     unzip -q "$ZIP_FILE" -d "$TMP_DIR"
-    rm "$ZIP_FILE"
+    # Notice we removed `rm "$ZIP_FILE"` so it stays on your disk for next time!
 else
     echo "ERROR: Download failed, $ZIP_FILE not found."
     exit 1
