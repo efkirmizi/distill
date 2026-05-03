@@ -160,11 +160,13 @@ class CPConv2d(nn.Module):
         weight = layer.weight.data
         out_channels, in_channels, kernel_height, kernel_width = weight.shape
 
-        # Perform CP decomposition (fall back to random init if SVD fails)
-        try:
-            cp_tensor = parafac(weight, rank=rank, init='svd', n_iter_max=100, tol=1e-5)
-        except Exception:
-            cp_tensor = parafac(weight, rank=rank, init='random', n_iter_max=100, tol=1e-5)
+        # Random init avoids SVD on mode unfoldings (SVD of [3, out*in*k] with
+        # full_matrices=True allocates V[98304,98304] ≈ 38 GB for large layers).
+        # tol=0 skips per-iteration kruskal_to_tensor reconstruction.
+        # Quality doesn't matter: student weights are random Kaiming init and
+        # will be fine-tuned from scratch.
+        with torch.no_grad():
+            cp_tensor = parafac(weight, rank=rank, init='random', n_iter_max=10, tol=0)
         cp_weights, (f_out, f_in, f_h, f_w) = cp_tensor
 
         # Absorb the CP scaling weights (lambda) into the output factor
@@ -226,11 +228,9 @@ class TuckerConv2d(nn.Module):
 
         dtype = weight.dtype
 
-        # Perform Tucker decomposition (fall back to random init if SVD fails)
-        try:
-            core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width], init='svd', n_iter_max=100, tol=1e-5)
-        except Exception:
-            core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width], init='random', n_iter_max=100, tol=1e-5)
+        with torch.no_grad():
+            core, factors = tucker(weight, rank=[rank_out, rank_in, kernel_height, kernel_width],
+                                   init='random', n_iter_max=10, tol=0)
         f_out, f_in, f_h, f_w = factors
 
         # Layer 1: Pointwise convolution (in_channels -> rank_in)
@@ -269,7 +269,7 @@ class TuckerConv2d(nn.Module):
 
 
 def decompose_model(model, method='cp', cp_rank_ratio=0.5, tucker_rank_ratio=0.5,
-                    use_vbmf=False, teacher_model=None, _rank_map=None):
+                    use_vbmf=False, teacher_model=None, _rank_map=None, device=None):
     """
     Recursively replaces all nn.Conv2d layers in the model with decomposed equivalents.
 
@@ -293,7 +293,7 @@ def decompose_model(model, method='cp', cp_rank_ratio=0.5, tucker_rank_ratio=0.5
     for name, module in model.named_children():
         if len(list(module.children())) > 0:
             decompose_model(module, method, cp_rank_ratio, tucker_rank_ratio,
-                            use_vbmf, teacher_model=None, _rank_map=_rank_map)
+                            use_vbmf, teacher_model=None, _rank_map=_rank_map, device=device)
         elif isinstance(module, nn.Conv2d):
             # Skip 1×1 and grouped/depthwise (decomposition undefined or counterproductive)
             if module.kernel_size == (1, 1) or module.kernel_size == 1 or module.groups > 1:
@@ -336,5 +336,8 @@ def decompose_model(model, method='cp', cp_rank_ratio=0.5, tucker_rank_ratio=0.5
                 raise ValueError(f"Unknown decomposition method: {method}")
 
             setattr(model, name, new_module)
+            if device is not None:
+                new_module.to(device)
+                gc.collect()
 
     return model

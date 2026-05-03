@@ -443,16 +443,16 @@ def main():
         rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
         print(f"==> Decomposing student with CP factorization ({rank_desc})...")
         model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
-                                  use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf)
-        model_s = model_s.cuda()
+                                  use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                  device='cuda')
         gc.collect()
         if args.dual_cmtf:
             t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
             print(f"==> Decomposing parallel student with Tucker ({t_rank_desc})...")
             model_s2 = decompose_model(model_s2, method='tucker',
                                        tucker_rank_ratio=args.tucker_rank_ratio,
-                                       use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf)
-            model_s2 = model_s2.cuda()
+                                       use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                       device='cuda')
             gc.collect()
 
     if args.sync_bn:

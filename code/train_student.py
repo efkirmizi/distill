@@ -255,8 +255,10 @@ def main():
         _teacher_for_vbmf = model_t if opt.use_vbmf else None
         rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.cp_rank_ratio}"
         print(f"==> Decomposing student model with CP factorization ({rank_desc})...")
+        _dev = 'cuda' if torch.cuda.is_available() else None
         model_s = decompose_model(model_s, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
-                                  use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf)
+                                  use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                  device=_dev)
         model_s = nn.DataParallel(model_s).cuda()
         gc.collect()
         if opt.dual_cmtf:
@@ -264,7 +266,8 @@ def main():
             print(f"==> Decomposing parallel student model with Tucker ({t_rank_desc})...")
             model_s2 = decompose_model(model_s2, method='tucker',
                                        tucker_rank_ratio=opt.tucker_rank_ratio,
-                                       use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf)
+                                       use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                       device=_dev)
             model_s2 = nn.DataParallel(model_s2).cuda()
             gc.collect()
 
