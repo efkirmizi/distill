@@ -30,6 +30,7 @@ import json
 import math
 
 import torch
+torch.set_float32_matmul_precision('high')
 import torch.optim as optim
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
