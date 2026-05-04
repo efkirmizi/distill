@@ -773,6 +773,10 @@ def main():
     total_time = AverageMeter()
 
     for epoch in range(args.start_epoch, args.epochs):
+        if args.local_rank == 0:
+            print("==> training...")
+            print('hint positions: ', args.hint_points)
+
         # ---- Train ----
         time1 = time.time()
         if args.distill is not None:
@@ -799,15 +803,31 @@ def main():
         if args.test:
             break
 
+        if args.local_rank == 0:
+            print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time))
+            print('train_acc CP:', train_p1)
+            print('train_loss CP:', train_loss)
+            if args.dual_cmtf:
+                print('train_acc Tucker:', train_p1_2)
+                print('train_loss Tucker:', train_loss_2)
+
         # ---- Validate ----
         if args.dual_cmtf:
             acc1, acc5, acc1_2, acc5_2, test_loss, test_loss_2 = validate(val_loader, model_s, criterion_cls, model_s2=model_s2)
         else:
             acc1, acc5, test_loss = validate(val_loader, model_s, criterion_cls)
-        
+
         # ---- Save best / checkpoint ----
         if args.local_rank == 0:
             current_lr = optimizer.param_groups[0]['lr']
+
+            print('test_acc CP:', acc1)
+            print('test_loss CP:', test_loss)
+            print('test_acc_top5 CP:', acc5)
+            if args.dual_cmtf:
+                print('test_acc Tucker:', acc1_2)
+                print('test_loss Tucker:', test_loss_2)
+                print('test_acc_top5 Tucker:', acc5_2)
 
             # CP / primary student
             is_best = acc1 > best_acc1
@@ -844,8 +864,6 @@ def main():
                 save_checkpoint(tk_ckpt, is_best_2, args.save_folder, tag='tucker')
 
             # CP stats + CSV
-            print('CP  => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
-                acc1, acc5, best_acc1))
             ew = loss_weighter.effective_weights() if loss_weighter is not None else [args.gamma, args.alpha, args.beta]
             csv_writer_cp.writerow([
                 epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
@@ -857,8 +875,6 @@ def main():
 
             # Tucker stats + CSV
             if args.dual_cmtf:
-                print('Tucker => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
-                    acc1_2, acc5_2, best_acc1_2))
                 ew2 = loss_weighter_2.effective_weights() if loss_weighter_2 is not None else [args.gamma, args.alpha, args.beta]
                 csv_writer_tk.writerow([
                     epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
