@@ -652,6 +652,13 @@ def main():
                 if os.path.isfile(tk_path):
                     print("=> loading Tucker checkpoint '{}'".format(tk_path))
                     ckpt_tk = torch.load(tk_path, map_location=lambda storage, loc: storage.cuda(args.gpu))
+                    tk_epoch = ckpt_tk['epoch']
+                    if tk_epoch != args.start_epoch:
+                        # Can happen if a crash occurred between the two checkpoint saves.
+                        # Restart both students from the earlier epoch so they stay in sync.
+                        print(f"=> Warning: CP epoch ({args.start_epoch}) != Tucker epoch ({tk_epoch}). "
+                              f"Resuming both from epoch {min(args.start_epoch, tk_epoch)}.")
+                        args.start_epoch = min(args.start_epoch, tk_epoch)
                     best_acc1_2 = ckpt_tk.get('best_acc1', 0.0)
                     model_s2.load_state_dict(ckpt_tk['state_dict'])
                     optimizer_2.load_state_dict(ckpt_tk['optimizer'])
@@ -815,29 +822,11 @@ def main():
             }
             if loss_weighter is not None:
                 cp_ckpt['loss_weighter'] = loss_weighter.state_dict()
-            save_checkpoint(cp_ckpt, is_best, args.save_folder, tag='cp')
 
-            print('CP  => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
-                acc1, acc5, best_acc1))
-            if loss_weighter is not None:
-                ew = loss_weighter.effective_weights()
-            else:
-                ew = [args.gamma, args.alpha, args.beta]
-
-            # ---- CSV row ----
-            csv_writer_cp.writerow([
-                epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
-                f'{train_p1:.3f}', f'{train_p5:.3f}', f'{train_loss:.4f}',
-                f'{train_loss_cls:.4f}', f'{train_loss_div:.4f}', f'{train_loss_kd:.4f}',
-                f'{acc1:.3f}', f'{acc5:.3f}', f'{test_loss:.4f}', f'{best_acc1:.3f}',
-                f'{ew[0]:.6f}', f'{ew[1]:.6f}', f'{ew[2]:.6f}'])
-            csv_file_cp.flush()
-
-            # Tucker / secondary student
+            # Build Tucker ckpt dict before any disk writes
             if args.dual_cmtf:
                 is_best_2 = acc1_2 > best_acc1_2
                 best_acc1_2 = max(acc1_2, best_acc1_2)
-
                 tk_ckpt = {
                     'epoch': epoch + 1,
                     'model_s': args.model_s,
@@ -847,15 +836,30 @@ def main():
                 }
                 if loss_weighter_2 is not None:
                     tk_ckpt['loss_weighter'] = loss_weighter_2.state_dict()
-                save_checkpoint(tk_ckpt, is_best_2, args.save_folder, tag='tucker')
-                if loss_weighter_2 is not None:
-                    ew2 = loss_weighter_2.effective_weights()
-                else:
-                    ew2 = [args.gamma, args.alpha, args.beta]
 
+            # Save BOTH checkpoints before any CSV flush so a disk-full event
+            # can't leave one checkpoint behind the other.
+            save_checkpoint(cp_ckpt, is_best, args.save_folder, tag='cp')
+            if args.dual_cmtf:
+                save_checkpoint(tk_ckpt, is_best_2, args.save_folder, tag='tucker')
+
+            # CP stats + CSV
+            print('CP  => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
+                acc1, acc5, best_acc1))
+            ew = loss_weighter.effective_weights() if loss_weighter is not None else [args.gamma, args.alpha, args.beta]
+            csv_writer_cp.writerow([
+                epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
+                f'{train_p1:.3f}', f'{train_p5:.3f}', f'{train_loss:.4f}',
+                f'{train_loss_cls:.4f}', f'{train_loss_div:.4f}', f'{train_loss_kd:.4f}',
+                f'{acc1:.3f}', f'{acc5:.3f}', f'{test_loss:.4f}', f'{best_acc1:.3f}',
+                f'{ew[0]:.6f}', f'{ew[1]:.6f}', f'{ew[2]:.6f}'])
+            csv_file_cp.flush()
+
+            # Tucker stats + CSV
+            if args.dual_cmtf:
                 print('Tucker => Acc@1 {:.3f}  Acc@5 {:.3f}  Best {:.3f}'.format(
                     acc1_2, acc5_2, best_acc1_2))
-
+                ew2 = loss_weighter_2.effective_weights() if loss_weighter_2 is not None else [args.gamma, args.alpha, args.beta]
                 csv_writer_tk.writerow([
                     epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
                     f'{train_p1_2:.3f}', f'{train_p5_2:.3f}', f'{train_loss_2:.4f}',

@@ -193,6 +193,16 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         echo "  Using standard PyTorch DataLoader (no DALI)"
     fi
 
+    # Resume from a previous run (leave empty to start fresh)
+    # Set to the student save directory, e.g.:
+    #   RESUME_DIR="./save/student_model/imagenet100/3,8,11,16/S-ResNet18_T-ResNet34_imagenet_pursuhint_cmtf_r-1.0_a-4.0_b-25.0_0"
+    RESUME_DIR=""
+    RESUME_FLAG=""
+    if [ -n "$RESUME_DIR" ]; then
+        RESUME_FLAG="--resume ${RESUME_DIR}"
+        echo "  Resuming from: ${RESUME_DIR}"
+    fi
+
     # Number of GPUs to use for training
     NUM_GPUS=1
 
@@ -219,6 +229,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         ${VBMF_FLAG} ${DALI_FLAG} \
         ${DYNAMIC_LOSS_WEIGHTS} \
         ${TORCH_COMPILE} \
+        ${RESUME_FLAG} \
         "${IMAGENET_DIR}" >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"
