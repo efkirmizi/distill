@@ -9,6 +9,8 @@ Usage:
 
 import torch
 import torch.nn as nn
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
 import time
 import argparse
 import sys
@@ -35,6 +37,8 @@ def parse_option():
     parser.add_argument('--dataset', type=str, default='cifar10',
                         choices=['cifar100', 'cifar10', 'imagenet100'],
                         help='dataset used for evaluation')
+    parser.add_argument('--data_folder', type=str, default=None,
+                        help='path to dataset root (required for imagenet100; must contain val/ subdir)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--num_workers', type=int, default=4, help='dataloader workers')
     parser.add_argument('--print_freq', type=int, default=100, help='print frequency')
@@ -202,8 +206,18 @@ def evaluate():
                                                  num_workers=opt.num_workers)
         n_cls = 10
     elif opt.dataset == 'imagenet100':
-        _, val_loader = get_imagenet_dataloader(batch_size=opt.batch_size,
-                                                 num_workers=opt.num_workers)
+        if opt.data_folder is None:
+            raise ValueError("--data_folder is required for imagenet100 evaluation")
+        val_transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        val_set = datasets.ImageFolder(os.path.join(opt.data_folder, 'val'), transform=val_transform)
+        val_loader = torch.utils.data.DataLoader(
+            val_set, batch_size=opt.batch_size, shuffle=False,
+            num_workers=opt.num_workers, pin_memory=True)
         n_cls = 100
     else:
         raise NotImplementedError(opt.dataset)

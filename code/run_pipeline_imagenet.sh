@@ -249,6 +249,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \
+        --data_folder "${IMAGENET_DIR}" \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
         --model_s ${MODEL_S} \
