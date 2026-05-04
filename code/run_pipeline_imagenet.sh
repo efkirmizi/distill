@@ -41,6 +41,11 @@ TEACHER_SAVE_DIR="./save/models/${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGHT_D
 TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_best.pth"
 HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_best"
 
+# Resume from a previous run (leave empty to start fresh)
+# Set to the student save directory, e.g.:
+# RESUME_DIR="./save/student_model/imagenet100/3,8,11,16/S-ResNet18_T-ResNet34_imagenet_pursuhint_cmtf_r-1.0_a-4.0_b-25.0_0"
+RESUME_DIR=""
+
 # Student training loss weights
 GAMMA=1.0
 ALPHA=4.0
@@ -193,10 +198,6 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         echo "  Using standard PyTorch DataLoader (no DALI)"
     fi
 
-    # Resume from a previous run (leave empty to start fresh)
-    # Set to the student save directory, e.g.:
-    #   RESUME_DIR="./save/student_model/imagenet100/3,8,11,16/S-ResNet18_T-ResNet34_imagenet_pursuhint_cmtf_r-1.0_a-4.0_b-25.0_0"
-    RESUME_DIR=""
     RESUME_FLAG=""
     if [ -n "$RESUME_DIR" ]; then
         RESUME_FLAG="--resume ${RESUME_DIR}"
