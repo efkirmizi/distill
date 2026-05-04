@@ -528,7 +528,8 @@ def main():
             _probe = torch.randn(1, 3, 32, 32).cuda()
         else:
             _probe = torch.randn(1, 3, 224, 224).cuda()
-        _feats, _ = model_t(_probe, is_feat=True, preact=opt.preact)
+        _model_t_core = model_t.module if isinstance(model_t, nn.DataParallel) else model_t
+        _feats, _ = _model_t_core(_probe, is_feat=True, preact=opt.preact)
         _feat_bytes = sum(n_data * _feats[hi].numel() * 4 for hi in hint_indices)
         del _probe, _feats
 
