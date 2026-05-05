@@ -146,7 +146,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         proj_cp = None  # CP student's batch projectors, passed to Tucker for coupling
 
         # ===================forward CP student=====================
-        preact = False
+        preact = getattr(opt, 'preact', False)
         with torch.amp.autocast('cuda', enabled=scaler is not None):
             feat_s, logit_s = model_s(input, is_feat=True, preact=preact)
 

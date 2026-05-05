@@ -153,7 +153,7 @@ def parse():
                         help='teacher hint positions (comma-separated, 1-indexed)')
     parser.add_argument('--s_points', type=str, default=None,
                         help='student hint positions (auto-detected if not specified)')
-    parser.add_argument('--preact', type=bool, default=False,
+    parser.add_argument('--preact', action='store_true',
                         help='use pre-activation features')
 
     # Data loading backend
@@ -169,7 +169,7 @@ def parse():
     parser.add_argument('--opt-level', type=str, default=None)
     parser.add_argument('--keep-batchnorm-fp32', type=str, default=None)
     parser.add_argument('--loss-scale', type=str, default=None)
-    parser.add_argument('--channels-last', type=bool, default=False)
+    parser.add_argument('--channels-last', action='store_true')
 
     # Profiling / test mode
     parser.add_argument('--prof', default=-1, type=int,

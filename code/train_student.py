@@ -114,7 +114,7 @@ def parse_option():
     parser.add_argument('--s_points', type=str, default=None)
 
     #for preAct:
-    parser.add_argument('--preact', type=bool, default=False)
+    parser.add_argument('--preact', action='store_true')
 
     # KL distillation
     parser.add_argument('--kd_T', type=float, default=4, help='temperature for KD distillation')
@@ -304,24 +304,37 @@ def main():
     if opt.s_points:
         s_points = opt.s_points
     else:
-        if opt.model_s == 'resnet8' or opt.model_s == 'resnet8x4':
+        if opt.model_s in ['resnet8', 'resnet8x4']:
             s_points = '1,2,3'
+        elif opt.model_s == 'resnet14':
+            s_points = '2,4,6'
         elif opt.model_s == 'resnet20':
             s_points = '3,6,9'
-        elif opt.model_s == 'resnet32':
+        elif opt.model_s in ['resnet32', 'resnet32x4']:
             s_points = '5,10,15'
+        elif opt.model_s == 'resnet44':
+            s_points = '7,14,21'
+        elif opt.model_s == 'resnet56':
+            s_points = '9,18,27'
         elif opt.model_s == 'resnet110':
             s_points = '18,36,54'
+        elif opt.model_s == 'ResNet50':
+            s_points = '3,7,13'
         elif opt.model_s == 'ShuffleV1':
             s_points = '4,12,16'
         elif opt.model_s == 'ShuffleV2':
-            s_points = '3,10,13'
-        elif opt.model_s == 'wrn_16_2':
+            s_points = '1,2,3'
+        elif opt.model_s in ['wrn_16_1', 'wrn_16_2']:
             s_points = '2,4,6'
+        elif opt.model_s in ['wrn_40_1', 'wrn_40_2']:
+            s_points = '6,12,18'
+        elif opt.model_s == 'MobileNetV2':
+            s_points = '1,2,3'
         elif opt.model_s in ['vgg8', 'vgg11', 'vgg13', 'vgg16', 'vgg19']:
-            s_points = opt.hint_points
+            s_points = '1,2,3'
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"No default s_points for student model '{opt.model_s}'. "
+                                      f"Pass --s_points explicitly.")
     # Persist so loops.py doesn't recompute every batch
     opt.s_points = s_points
 
@@ -339,6 +352,12 @@ def main():
 
     feat_t = [feat_t[int(i)] for i in opt.hint_points.split(',')]
     feat_s = [feat_s[int(i)] for i in s_points.split(',')]
+
+    if len(feat_t) != len(feat_s):
+        raise ValueError(
+            f"hint_points has {len(feat_t)} points but s_points has {len(feat_s)} — "
+            f"they must match. hint_points='{opt.hint_points}', s_points='{s_points}'"
+        )
 
     if opt.dual_cmtf:
         model_s2.eval()
@@ -597,13 +616,18 @@ def main():
             if os.path.isfile(tk_path):
                 print(f"=> loading Tucker checkpoint '{tk_path}'")
                 ckpt2 = torch.load(tk_path, map_location='cpu')
+                tk_epoch = ckpt2['epoch']
+                if tk_epoch != ckpt['epoch']:
+                    print(f"=> Warning: CP epoch ({ckpt['epoch']}) != Tucker epoch ({tk_epoch}). "
+                          f"Resuming both from epoch {min(ckpt['epoch'], tk_epoch)}.")
+                    opt.start_epoch = min(ckpt['epoch'], tk_epoch) + 1
                 best_acc_2 = ckpt2.get('best_acc', 0.0)
                 model_s2.load_state_dict(ckpt2['model'])
                 optimizer_2.load_state_dict(ckpt2['optimizer'])
                 scaler_2.load_state_dict(ckpt2['scaler'])
                 if loss_weighter_2 is not None and 'loss_weighter' in ckpt2:
                     loss_weighter_2.load_state_dict(ckpt2['loss_weighter'])
-                print(f"=> Tucker resumed from epoch {ckpt2['epoch']}, best_acc={best_acc_2:.2f}")
+                print(f"=> Tucker resumed from epoch {tk_epoch}, best_acc={best_acc_2:.2f}")
             else:
                 print(f"=> no Tucker checkpoint found at '{tk_path}'")
 
