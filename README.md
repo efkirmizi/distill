@@ -1,4 +1,4 @@
-# PURSUhInT + CMTF: Coupled Tensor Decomposition for Knowledge Distillation
+# Joint Knowledge Distillation and Tensor-Based Compression of Deep Neural Networks
 
 An extension of the **PURSUhInT** knowledge distillation framework that introduces a novel **Coupled Matrix-Tensor Factorization (CMTF) distillation loss** and integrates **CP and Tucker tensor decomposition** directly into the student training pipeline. Two structurally different compressed student models — one CP-decomposed, one Tucker-decomposed — are trained simultaneously under a shared teacher, enforcing a common semantic latent space via bidirectional batch-subspace coupling.
 
