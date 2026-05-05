@@ -138,7 +138,7 @@ Empirical Variational Bayes Matrix Factorization (Nakajima et al., JMLR 2013) es
 pip install torch torchvision
 pip install tensorly
 pip install thop
-pip install scipy numpy pillow tqdm tensorboard tensorboard_logger psutil
+pip install scipy numpy pillow tqdm tensorboard tensorboard-logger psutil
 pip install kaggle
 ```
 
