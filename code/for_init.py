@@ -2,17 +2,22 @@ from collections import OrderedDict
 
 
 def remove_module(state_dict):
-    """Safely strips DataParallel and torch.compile prefixes from state_dict keys."""
+    """Strips all DataParallel/torch.compile wrapper prefixes from state_dict keys.
+
+    Handles any nesting order or repetition of 'module.' and '_orig_mod.',
+    e.g. '_orig_mod.module.X', 'module._orig_mod.X', 'module.module.X'.
+    """
+    prefixes = ('module.', '_orig_mod.')
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
         name = k
-        # Strip DataParallel prefix if it exists
-        if name.startswith('module.'):
-            name = name[7:]
-        # Strip torch.compile prefix if it exists
-        if name.startswith('_orig_mod.'):
-            name = name[10:]
-            
+        changed = True
+        while changed:
+            changed = False
+            for p in prefixes:
+                if name.startswith(p):
+                    name = name[len(p):]
+                    changed = True
         new_state_dict[name] = v
     return new_state_dict
 

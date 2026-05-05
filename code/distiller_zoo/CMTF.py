@@ -38,15 +38,29 @@ class CoupledTensorLoss(nn.Module):
         feat : B × C × H × W  (any shape with batch first)
         returns : B × B  matrix  P = U Uᵀ,  where U holds the top-R left
                   singular vectors of the batch-unfolded matrix B×(C·H·W).
+
+        Implementation note: we eigendecompose the Gram matrix G = M Mᵀ (B×B)
+        rather than calling svd_lowrank on M directly.  The eigenvectors of G
+        are exactly the left singular vectors of M, and torch.linalg.eigh
+        (symmetric solver) is far more numerically stable than any SVD path
+        when the student features are near-constant early in training.
         """
         B = feat.shape[0]
         M = feat.reshape(B, -1).float()          # B × D, force fp32
         q = min(self.rank, B, M.shape[1])
-        # svd_lowrank internally calls linalg.qr which is not implemented for fp16;
-        # disable autocast locally so internal matmuls stay in fp32.
+
+        # Frobenius-normalise: scaling M by a constant leaves U unchanged
+        # (SVD(M/c) = U @ (S/c) @ Vᵀ) but keeps the Gram matrix well-scaled.
+        norm = M.norm()
+        if norm > 0:
+            M = M / norm
+
+        # Disable autocast: eigh requires fp32.
         with torch.amp.autocast('cuda', enabled=False):
-            U = torch.svd_lowrank(M, q=q)[0]     # B × q
-        return U @ U.t()                          # B × B
+            G = M @ M.t()                            # B × B, symmetric PSD
+            # eigh returns eigenvalues in ascending order; take the last q columns.
+            U = torch.linalg.eigh(G).eigenvectors[:, -q:]   # B × q
+        return U @ U.t()                             # B × B
 
     def forward(self, f_s, f_t, coupling_proj=None):
         """
