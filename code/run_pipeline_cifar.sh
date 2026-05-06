@@ -23,14 +23,14 @@ DATASET="cifar100"
 MODEL_T="wrn_40_2"
 MODEL_S="wrn_16_2"
 TRIAL=0
-NUM_LAYERS=18                        # WideResNet-40 has 18 sub-blocks
+NUM_LAYERS=18                        # wrn_40_2 has 18 sub-blocks (3 stages × 6 blocks)
 NUM_CLUSTERS=3                       # 3 hint points for CIFAR experiments
 METRIC="r2"
-EPOCHS=1
-LR_DECAY_EPOCHS="60,120,160"
+EPOCHS=240
+LR_DECAY_EPOCHS="150,180,210"
 BATCH=64
-NUM_WORKERS=4
-LR=0.1
+NUM_WORKERS=8
+LR=0.05
 WEIGHT_DECAY=0.0005                  # Standard CIFAR WD
 
 # Paths
