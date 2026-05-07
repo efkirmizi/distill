@@ -153,10 +153,10 @@ if [ "$RUN_CLUSTERING" -eq 1 ]; then
         --num_layers ${NUM_LAYERS} \
         --metric_name ${METRIC} \
         --output_dir ./save/hints \
-        --model_name ${MODEL_T} >> "${LOG}" 2>&1 || { echo "ERROR: k_means.py clustering failed. Check ${LOG}."; exit 1; }
+        --model_name ${MODEL_T}_${DATASET} >> "${LOG}" 2>&1 || { echo "ERROR: k_means.py clustering failed. Check ${LOG}."; exit 1; }
 
     # Read the centroid file -> HINT_POINTS variable
-    CENTROID_FILE="./save/hints/${MODEL_T}_${NUM_CLUSTERS}clusters_${METRIC}_centroids.txt"
+    CENTROID_FILE="./save/hints/${MODEL_T}_${DATASET}_${NUM_CLUSTERS}clusters_${METRIC}_centroids.txt"
     if [ ! -f "${CENTROID_FILE}" ]; then
         echo "ERROR: Centroid file not found: ${CENTROID_FILE}"
         exit 1
