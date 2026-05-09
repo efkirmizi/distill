@@ -78,7 +78,7 @@ def parse_option():
 
     # Model
     parser.add_argument('--model', type=str, default='ResNet34',
-                        choices=['ResNet18', 'ResNet34'],
+                        choices=['ResNet18', 'ResNet34', 'ResNet50'],
                         help='teacher model architecture (from models/resnetv2.py)')
 
     # Data

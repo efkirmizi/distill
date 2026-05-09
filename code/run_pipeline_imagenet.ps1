@@ -28,7 +28,7 @@ Write-Host "====================================================================
 # Note: On Windows, the command is usually 'python' instead of 'python3'
 $PYTHON = "python" 
 $DATASET = "imagenet100"
-$MODEL_T = "ResNet34"
+$MODEL_T = "ResNet50"
 $MODEL_S = "ResNet18"
 $TRIAL = "1"
 $NUM_LAYERS = 16

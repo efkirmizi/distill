@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument('--t_path', type=str, required=True,
                         help='Path to the pre-trained teacher model checkpoint.')
     parser.add_argument('--model_t', type=str, default='ResNet34',
-                        choices=['ResNet18', 'ResNet34'],
+                        choices=['ResNet18', 'ResNet34', 'ResNet50'],
                         help='Teacher model architecture name.')
     parser.add_argument('--preact', type=bool, default=False,
                         help='Extract pre-activation hints.')
@@ -102,13 +102,15 @@ def main():
     # ---- Per-model channel dictionaries ----
     # These map sub-block index i (1-indexed) to the channel count of feats[i]
     # from resnetv2.py forward: feats = [f0] + f1_act + f2_act + f3_act + f4_act + [f5]
-    # Only BasicBlock-based models (ResNet18/34) support feature collection.
     ch_dicts = {
         # ResNet18: [2,2,2,2] BasicBlocks -> 8 sub-blocks
         'ResNet18': [64, 64, 128, 128, 256, 256, 512, 512],
         # ResNet34: [3,4,6,3] BasicBlocks -> 16 sub-blocks
         'ResNet34': [64, 64, 64, 128, 128, 128, 128,
                      256, 256, 256, 256, 256, 256, 512, 512, 512],
+        # ResNet50: [3,4,6,3] Bottleneck blocks (expansion=4) -> 16 sub-blocks
+        'ResNet50': [256, 256, 256, 512, 512, 512, 512,
+                     1024, 1024, 1024, 1024, 1024, 1024, 2048, 2048, 2048],
     }
 
     if opt.model_t not in ch_dicts:

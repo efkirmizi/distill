@@ -20,11 +20,11 @@ echo "==========================================================================
 # ==============================================================================
 PYTHON="python3"
 DATASET="cifar100"
-MODEL_T="wrn_40_2"
-MODEL_S="wrn_16_2"
+MODEL_T="vgg13"
+MODEL_S="vgg8"
 TRIAL=0
-NUM_LAYERS=18                        # wrn_40_2 has 18 sub-blocks (3 stages × 6 blocks)
-NUM_CLUSTERS=3                       # 3 hint points for CIFAR experiments
+NUM_LAYERS=4                         # vgg13 has 4 pooling-separated blocks
+NUM_CLUSTERS=3                       # must match vgg8 student's s_points (1,2,3)
 METRIC="r2"
 EPOCHS=240
 LR_DECAY_EPOCHS="150,180,210"

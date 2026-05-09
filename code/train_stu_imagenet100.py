@@ -78,6 +78,7 @@ except ImportError:
 S_POINTS_DICT = {
     'ResNet18': '2,4,6,8',    # [2,2,2,2] BasicBlocks
     'ResNet34': '3,7,13,16',  # [3,4,6,3] BasicBlocks
+    'ResNet50': '3,7,13,16',  # [3,4,6,3] Bottleneck blocks (same block count as ResNet34)
 }
 
 
@@ -94,7 +95,7 @@ def parse():
                         choices=['ResNet18', 'ResNet34'],
                         help='student model architecture')
     parser.add_argument('--model_t', type=str, default='ResNet34',
-                        choices=['ResNet18', 'ResNet34'],
+                        choices=['ResNet18', 'ResNet34', 'ResNet50'],
                         help='teacher model architecture')
     parser.add_argument('--path_t', type=str,
                         default='save/models/ResNet34_imagenet/ResNet34_333f7ec4.pth',
