@@ -42,7 +42,7 @@ This work builds on **PURSUhInT** — a prior method for automatic hint-point se
 
 1. **What to distill into**: The student model's convolutional layers are structurally compressed via CP or Tucker tensor decomposition *before* training begins, not as a post-processing step. The decomposed model is trained end-to-end from scratch.
 
-2. **How to distill**: A novel CMTF loss aligns the student's batch subspace with the teacher's via truncated SVD projectors, combining spatial attention matching with sign-invariant subspace alignment.
+2. **How to distill**: A novel CMTF loss aligns the student's batch subspace with the teacher's via Gram-matrix eigendecomposition projectors, combining spatial attention matching with sign-invariant subspace alignment.
 
 3. **Dual-student coupling**: A CP-decomposed and a Tucker-decomposed student are trained simultaneously under the same teacher, with a bidirectional coupling term that forces them to share a common semantic latent space.
 
@@ -80,7 +80,7 @@ A two-part loss applied at each PURSUhInT hint point:
 
 **Part 1 — Spatial Attention Matching**: Squares each feature map element, averages across the channel dimension, L2-normalizes, and computes MSE between the student and teacher maps. This is a standard AT-style loss that is sign-invariant.
 
-**Part 2 — Batch-Subspace Alignment**: Reshapes the feature batch `B×C×H×W` into `B×(C·H·W)`, computes the top-R left singular vectors `U` via `torch.svd_lowrank`, and forms the orthogonal projector `P = U Uᵀ` (a `B×B` matrix). MSE between `P_student` and `P_teacher` aligns the student's batch-mode subspace with the teacher's. Because the projector is unique (up to sign in the full SVD, but projectors are sign-invariant), gradients flow cleanly through the SVD.
+**Part 2 — Batch-Subspace Alignment**: Reshapes the feature batch `B×C×H×W` into `B×(C·H·W)`, Frobenius-normalises the result, forms the Gram matrix `G = M Mᵀ` (B×B), and computes the top-R eigenvectors `U` via `torch.linalg.eigh`. The orthogonal projector `P = U Uᵀ` (a `B×B` matrix) is compared via MSE between student and teacher. Eigendecomposing the symmetric Gram matrix rather than calling `svd_lowrank` directly is numerically stable even when student features are near-constant early in training (which causes ill-conditioned matrices and SVD non-convergence). Because the projector is unique and sign-invariant, gradients flow cleanly through the eigendecomposition.
 
 **Coupling Term**: When two students are trained together, the CP student's projectors are detached and passed to the Tucker student as an additional regression target. This enforces that the two architecturally different students compress the input into the same semantic subspace.
 

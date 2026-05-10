@@ -13,10 +13,11 @@ class CoupledTensorLoss(nn.Module):
         L2-normalised → MSE. Established, well-grounded signal.
 
     Part 2 — Batch-Subspace Alignment:
-        Batch-unfolds each feature map into a B×(C·H·W) matrix and computes
-        the rank-R orthogonal projector P = U Uᵀ via truncated SVD.
+        Batch-unfolds each feature map into a B×(C·H·W) matrix, forms the
+        Gram matrix G = M Mᵀ (B×B), and computes the rank-R orthogonal
+        projector P = U Uᵀ via torch.linalg.eigh on G.
         Minimises ‖P_student − P_teacher‖_F².  Sign-invariant (projector is
-        unique); no ALS/parafac; gradients flow cleanly through svd_lowrank.
+        unique); no ALS/parafac; gradients flow cleanly through eigh.
 
     Coupling term (dual-student mode):
         When coupling_proj is supplied (CP student's projectors, detached),
