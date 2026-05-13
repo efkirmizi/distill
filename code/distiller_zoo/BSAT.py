@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 class CoupledTensorLoss(nn.Module):
     """
-    CMTF-guided co-distillation loss with two parts:
+    BSAT distillation loss with two parts:
 
     Part 1 — Spatial Attention Matching (AT loss):
         Aligns per-sample spatial attention maps between student and teacher
@@ -59,6 +59,9 @@ class CoupledTensorLoss(nn.Module):
         # Disable autocast: eigh requires fp32.
         with torch.amp.autocast('cuda', enabled=False):
             G = M @ M.t()                            # B × B, symmetric PSD
+            # Diagonal jitter: prevents eigh from failing on ill-conditioned G
+            # (near-duplicate eigenvalues cause LAPACK error 257 late in training).
+            G = G + 1e-6 * torch.eye(B, device=G.device, dtype=G.dtype)
             # eigh returns eigenvalues in ascending order; take the last q columns.
             U = torch.linalg.eigh(G).eigenvectors[:, -q:]   # B × q
         return U @ U.t()                             # B × B
