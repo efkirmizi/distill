@@ -1,6 +1,6 @@
 # Joint Knowledge Distillation and Tensor-Based Compression of Deep Neural Networks
 
-An extension of the **PURSUhInT** knowledge distillation framework that introduces a novel **Coupled Matrix-Tensor Factorization (CMTF) distillation loss** and integrates **CP and Tucker tensor decomposition** directly into the student training pipeline. Two structurally different compressed student models — one CP-decomposed, one Tucker-decomposed — are trained simultaneously under a shared teacher, enforcing a common semantic latent space via bidirectional batch-subspace coupling.
+An extension of the **PURSUhInT** knowledge distillation framework that introduces a novel **Batch-Subspace Alignment with Attention Transfer (BSAT) distillation loss** and integrates **CP and Tucker tensor decomposition** directly into the student training pipeline. Two structurally different compressed student models — one CP-decomposed, one Tucker-decomposed — are trained simultaneously under a shared teacher, enforcing a common semantic latent space via bidirectional batch-subspace coupling.
 
 Supports **CIFAR-10**, **CIFAR-100**, and **ImageNet-100**.
 
@@ -20,7 +20,7 @@ Supports **CIFAR-10**, **CIFAR-100**, and **ImageNet-100**.
 - [Method Details](#method-details)
   - [PURSUhInT Hint Selection](#pursuhint-hint-selection)
   - [Tensor Decomposition](#tensor-decomposition)
-  - [CMTF Loss](#cmtf-loss)
+  - [BSAT Loss](#bsat-loss)
   - [Dual-Student Training](#dual-student-training)
   - [Dynamic Loss Weighting](#dynamic-loss-weighting)
 - [Supported Models](#supported-models)
@@ -42,7 +42,7 @@ This work builds on **PURSUhInT** — a prior method for automatic hint-point se
 
 1. **What to distill into**: The student model's convolutional layers are structurally compressed via CP or Tucker tensor decomposition *before* training begins, not as a post-processing step. The decomposed model is trained end-to-end from scratch.
 
-2. **How to distill**: A novel CMTF loss aligns the student's batch subspace with the teacher's via Gram-matrix eigendecomposition projectors, combining spatial attention matching with sign-invariant subspace alignment.
+2. **How to distill**: A novel BSAT loss aligns the student's batch subspace with the teacher's via Gram-matrix eigendecomposition projectors, combining spatial attention matching with sign-invariant subspace alignment.
 
 3. **Dual-student coupling**: A CP-decomposed and a Tucker-decomposed student are trained simultaneously under the same teacher, with a bidirectional coupling term that forces them to share a common semantic latent space.
 
@@ -52,10 +52,10 @@ PURSUhInT itself provides the hint-point selection mechanism: it clusters all te
 
 ## Key Contributions
 
-> **Note**: PURSUhInT (automatic hint-point selection via representation clustering) is prior work. The contributions of this project are the CMTF loss, CP/Tucker decomposition integration, dual-student training, VBMF-guided rank selection, and the bidirectional coupling mechanism described below.
+> **Note**: PURSUhInT (automatic hint-point selection via representation clustering) is prior work. The contributions of this project are the BSAT loss, CP/Tucker decomposition integration, dual-student training, VBMF-guided rank selection, and the bidirectional coupling mechanism described below.
 
 ### Base Method: PURSUhInT
-PURSUhInT selects which teacher layers to use as distillation targets by running K-Means clustering over the teacher's layer representations, using R²-CCA or CKA as the distance measure. This project uses PURSUhInT's hint-point selection pipeline directly and builds the CMTF loss and decomposition framework on top of it.
+PURSUhInT selects which teacher layers to use as distillation targets by running K-Means clustering over the teacher's layer representations, using R²-CCA or CKA as the distance measure. This project uses PURSUhInT's hint-point selection pipeline directly and builds the BSAT loss and decomposition framework on top of it.
 
 ### CP Decomposition
 Each eligible `Conv2d(out, in, kH, kW)` is replaced by four sequential operations:
@@ -75,7 +75,7 @@ x → pointwise_in(in→rank_in, 1×1) → core_conv(rank_in→rank_out, kH×kW)
 
 The spatial kernel is preserved in the core convolution, which makes Tucker compression particularly effective for layers where the dominant cost is the spatial filtering rather than the channel mixing.
 
-### CMTF Loss — Coupled Matrix-Tensor Factorization
+### BSAT Loss — Batch-Subspace Alignment with Attention Transfer
 A two-part loss applied at each PURSUhInT hint point:
 
 **Part 1 — Spatial Attention Matching**: Squares each feature map element, averages across the channel dimension, L2-normalizes, and computes MSE between the student and teacher maps. This is a standard AT-style loss that is sign-invariant.
@@ -114,8 +114,8 @@ Empirical Variational Bayes Matrix Factorization (Nakajima et al., JMLR 2013) es
 ┌──────────────────────▼───────────────────────────────────────────┐
 │  [4/5] Train Dual Students (CP + Tucker)                        │
 │         Both students share teacher; per-batch bidirectional     │
-│         coupling via CMTF projectors                             │
-│         Loss = γ·CE  +  α·KLDiv  +  β·CMTF                     │
+│         coupling via BSAT projectors                             │
+│         Loss = γ·CE  +  α·KLDiv  +  β·BSAT                     │
 │         CIFAR: teacher outputs cached to RAM (if sufficient)     │
 │         → {model}_best_cp.pth, {model}_best_tucker.pth          │
 └──────────────────────┬───────────────────────────────────────────┘
@@ -202,12 +202,12 @@ Key settings in `run_pipeline_cifar.sh`:
 | `LR` | `0.05` | Initial learning rate |
 | `CP_RANK_RATIO` | `0.5` | CP global rank ratio (ignored when `USE_VBMF=1`) |
 | `TUCKER_RANK_RATIO` | `0.25` | Tucker global rank ratio (ignored when `USE_VBMF=1`) |
-| `CMTF_RANK` | `8` | SVD rank R for batch-subspace projectors |
-| `CMTF_COUPLING_WEIGHT` | `1.0` | Weight of Tucker←CP coupling term |
+| `BSAT_RANK` | `8` | SVD rank R for batch-subspace projectors |
+| `BSAT_COUPLING_WEIGHT` | `1.0` | Weight of Tucker←CP coupling term |
 | `USE_VBMF` | `1` | `1` = VBMF ranks from teacher, `0` = fixed ratios |
 | `ENABLE_TORCH_COMPILE` | `1` | `torch.compile` for faster training |
 | `ENABLE_DYNAMIC_LOSS_WEIGHTS` | `1` | Kendall et al. uncertainty weighting |
-| `GAMMA / ALPHA / BETA` | `1.0 / 4.0 / 25.0` | CE / KL-div / CMTF loss weights |
+| `GAMMA / ALPHA / BETA` | `1.0 / 4.0 / 25.0` | CE / KL-div / BSAT loss weights |
 
 Individual pipeline stages can be skipped by setting flags to `0`:
 
@@ -292,14 +292,14 @@ python train_student.py \
     --model_s wrn_16_2 \
     --model_t wrn_40_2 \
     --path_t ./save/models/wrn_40_2_cifar100_lr_0.05_decay_0.0005_trial_0/wrn_40_2_best.pth \
-    --distill pursuhint_cmtf \
-    --dual_cmtf \
+    --distill pursuhint_bsat \
+    --dual_bsat \
     --hint_points 5,10,16 \
     --cp_rank_ratio 0.5 \
     --tucker_rank_ratio 0.25 \
     --use_vbmf \
-    --cmtf_rank 8 \
-    --cmtf_coupling_weight 1.0 \
+    --bsat_rank 8 \
+    --bsat_coupling_weight 1.0 \
     --epochs 240 \
     --learning_rate 0.05 \
     --lr_decay_epochs 150,180,210 \
@@ -315,13 +315,13 @@ torchrun --nproc_per_node=1 --master_port 9200 train_stu_imagenet100.py \
     --model_s ResNet18 \
     --model_t ResNet34 \
     --path_t ./save/models/ResNet34_imagenet100_lr_0.1_decay_0.0001_trial_0/ResNet34_best.pth \
-    --distill pursuhint_cmtf \
-    --dual_cmtf \
+    --distill pursuhint_bsat \
+    --dual_bsat \
     --hint_points 3,7,13,16 \
     --cp_rank_ratio 0.5 \
     --tucker_rank_ratio 0.25 \
     --use_vbmf \
-    --cmtf_rank 8 \
+    --bsat_rank 8 \
     --epochs 100 \
     --lr 0.1 \
     --weight-decay 1e-4 \
@@ -339,8 +339,8 @@ python evaluate_metrics.py \
     --model_t wrn_40_2 \
     --path_t ./save/models/wrn_40_2_cifar100_lr_0.05_decay_0.0005_trial_0/wrn_40_2_best.pth \
     --model_s wrn_16_2 \
-    --path_s_cp  ./save/student_model/cifar100/5,10,16/S-wrn_16_2_T-wrn_40_2_cifar100_pursuhint_cmtf_.../wrn_16_2_best_cp.pth \
-    --path_s_tucker ./save/student_model/cifar100/5,10,16/S-wrn_16_2_T-wrn_40_2_cifar100_pursuhint_cmtf_.../wrn_16_2_best_tucker.pth \
+    --path_s_cp  ./save/student_model/cifar100/5,10,16/S-wrn_16_2_T-wrn_40_2_cifar100_pursuhint_bsat_.../wrn_16_2_best_cp.pth \
+    --path_s_tucker ./save/student_model/cifar100/5,10,16/S-wrn_16_2_T-wrn_40_2_cifar100_pursuhint_bsat_.../wrn_16_2_best_tucker.pth \
     --use_vbmf
 ```
 
@@ -350,7 +350,7 @@ python evaluate_metrics.py \
 
 ### PURSUhInT Hint Selection (Prior Work)
 
-This stage is adopted from PURSUhInT. It is used unchanged as the hint-point selection front-end for the CMTF distillation pipeline described below.
+This stage is adopted from PURSUhInT. It is used unchanged as the hint-point selection front-end for the BSAT distillation pipeline described below.
 
 **Representation extraction** (`store_hints.py` / `store_hints_imagenet100.py`):  
 For each teacher layer `i`, the script runs the teacher on a random subset of the training set (1/5 on CIFAR, 1/12 on ImageNet) with `is_feat=True` to collect intermediate feature maps. Spatial dimensions are collapsed by average pooling, giving an `N × C` matrix. This is saved as `hint{i}.pt`.
@@ -378,18 +378,18 @@ Decomposition is applied to all `Conv2d` layers that are not 1×1 convolutions a
 
 **VBMF rank selection** (`--use_vbmf`): For each student layer `i`, the corresponding teacher layer `j = round(i × (T−1) / (S−1))` is identified via positional interpolation. EVBMF is run on the teacher layer's mode-0 (output channel) unfolding to estimate its intrinsic rank. That rank is expressed as a fraction of the teacher's channel count and scaled to the student's channel dimensions. This transfers the teacher's capacity utilization pattern, layer by layer, to the structurally smaller student.
 
-### CMTF Loss
+### BSAT Loss
 
 Applied at each PURSUhInT hint point. The total loss per batch is:
 
 ```
-L_total = γ · L_CE  +  α · L_KLDiv  +  β · L_CMTF
+L_total = γ · L_CE  +  α · L_KLDiv  +  β · L_BSAT
 ```
 
-`L_CMTF` sums contributions from all hint points, each consisting of two terms:
+`L_BSAT` sums contributions from all hint points, each consisting of two terms:
 
 ```
-L_CMTF = Σ_k [ MSE(att_s^k, att_t^k)  +  MSE(P_s^k, P_t^k) ]
+L_BSAT = Σ_k [ MSE(att_s^k, att_t^k)  +  MSE(P_s^k, P_t^k) ]
 ```
 
 where `att^k = normalize(feat^k.pow(2).mean(channels))` is the spatial attention map and `P^k = U_k U_k^T` is the rank-R orthogonal projector of the batch-unfolded feature matrix.
@@ -424,7 +424,7 @@ On CIFAR, teacher logits and hint-point features are precomputed over the entire
 
 ### Dynamic Loss Weighting
 
-With `--dynamic_loss_weights`, the three loss terms (CE, KLDiv, CMTF) are combined using Kendall et al.'s homoscedastic uncertainty method (CVPR 2018). A learnable log-variance parameter `s_i` is maintained for each loss component:
+With `--dynamic_loss_weights`, the three loss terms (CE, KLDiv, BSAT) are combined using Kendall et al.'s homoscedastic uncertainty method (CVPR 2018). A learnable log-variance parameter `s_i` is maintained for each loss component:
 
 ```
 L_total = Σ_i [ exp(−s_i) · L_i  +  s_i ]
@@ -492,7 +492,7 @@ When `--s_points` is not passed, the student training scripts auto-detect the co
 | `crd` | ✓ | ✗ | Contrastive Representation Distillation — NCE on feature embeddings |
 | `WSL_crd` | ✓ | ✗ | Weak Soft Labels combined with CRD |
 | `ATT_crd` | ✓ | ✗ | Attention Transfer combined with CRD |
-| `pursuhint_cmtf` | ✓ | ✓ | **This work** — PURSUhInT hint selection + CMTF loss |
+| `pursuhint_bsat` | ✓ | ✓ | **This work** — PURSUhInT hint selection + BSAT loss |
 
 CRD-based methods (`crd`, `WSL_crd`, `ATT_crd`) are **not supported on ImageNet** because they require per-sample contrastive indices that are unavailable from the DALI pipeline, and ImageNet-scale precomputation of the memory bank is impractical.
 
@@ -563,15 +563,15 @@ Main student training script for CIFAR-10/100. Supports all distillation methods
 | `--path_t` | — | Path to teacher `.pth` checkpoint |
 | `--path_s` | — | Optional: path to a pre-trained student checkpoint to load |
 | `--distill` | `kd` | Distillation method (see table above) |
-| `--dual_cmtf` | off | Train CP + Tucker students simultaneously (requires `pursuhint_cmtf`) |
+| `--dual_bsat` | off | Train CP + Tucker students simultaneously (requires `pursuhint_bsat`) |
 | `--hint_points` | `15,37,53` | Teacher layer indices for distillation (comma-separated, 0-indexed) |
 | `--s_points` | auto | Student layer indices; auto-detected per architecture if not specified |
 | `--preact` | off | Use pre-activation features (post-BN, pre-ReLU) |
 | `--cp_rank_ratio` | `0.5` | CP global rank as fraction of `max(out, in)` channels |
 | `--tucker_rank_ratio` | `0.5` | Tucker rank as fraction of channel count |
 | `--use_vbmf` | off | Estimate per-layer ranks from teacher weights via EVBMF |
-| `--cmtf_rank` | `8` | SVD truncation rank R for batch-subspace projectors |
-| `--cmtf_coupling_weight` | `1.0` | Weight of the Tucker←CP coupling term in dual CMTF mode |
+| `--bsat_rank` | `8` | SVD truncation rank R for batch-subspace projectors |
+| `--bsat_coupling_weight` | `1.0` | Weight of the Tucker←CP coupling term in dual BSAT mode |
 | `--epochs` | `240` | Training epochs |
 | `--start_epoch` | `1` | Starting epoch (set automatically when resuming) |
 | `--batch_size` | `64` | Batch size |
@@ -615,15 +615,15 @@ Student training script for ImageNet-100. Launched via `torchrun`. Supports DDP 
 | `--model_t` | `ResNet34` | Teacher architecture: `ResNet18` or `ResNet34` |
 | `--path_t` | — | Path to teacher checkpoint |
 | `--distill` | — | Distillation method (omit for vanilla student training) |
-| `--dual_cmtf` | off | Train CP + Tucker students simultaneously (requires `pursuhint_cmtf`) |
+| `--dual_bsat` | off | Train CP + Tucker students simultaneously (requires `pursuhint_bsat`) |
 | `--hint_points` | `3,7,13,16` | Teacher layer indices (comma-separated, 0-indexed) |
 | `--s_points` | auto | Student layer indices; auto-detected from `S_POINTS_DICT` |
 | `--preact` | off | Use pre-activation features |
 | `--cp_rank_ratio` | `0.5` | CP global rank ratio |
 | `--tucker_rank_ratio` | `0.5` | Tucker global rank ratio |
 | `--use_vbmf` | off | EVBMF-from-teacher rank selection |
-| `--cmtf_rank` | `8` | SVD rank R for batch-subspace projectors |
-| `--cmtf_coupling_weight` | `1.0` | Tucker←CP coupling weight |
+| `--bsat_rank` | `8` | SVD rank R for batch-subspace projectors |
+| `--bsat_coupling_weight` | `1.0` | Tucker←CP coupling weight |
 | `--epochs` | `100` | Total training epochs |
 | `--lr` | `0.1` | Base learning rate (scaled by global batch / 256) |
 | `--weight-decay` | `1e-4` | SGD weight decay |
@@ -759,7 +759,7 @@ code/
 ├── prepare_imagenet100.sh        # Download + restructure ImageNet-100 from Kaggle
 │
 ├── distiller_zoo/
-│   ├── CMTF.py                   # Coupled Matrix-Tensor Factorization loss (novel)
+│   ├── BSAT.py                   # Batch-Subspace Alignment with Attention Transfer loss (novel)
 │   ├── KD.py                     # Hinton et al. KL-divergence distillation
 │   ├── FitNet.py                 # Hint-based feature regression (FitNet)
 │   ├── AT.py                     # Attention Transfer
@@ -781,7 +781,7 @@ code/
 │   ├── loops.py                  # train_vanilla, train_distill, validate
 │   ├── util.py                   # AverageMeter, accuracy, LR schedulers
 │   ├── uncertainty_weighter.py   # Kendall et al. dynamic loss weighting
-│   └── pretrain.py               # FitNet hint-layer pretraining (non-CMTF methods)
+│   └── pretrain.py               # FitNet hint-layer pretraining (non-BSAT methods)
 │
 ├── dataset/
 │   ├── cifar100.py               # CIFAR-100 loaders (standard, instance, sample)

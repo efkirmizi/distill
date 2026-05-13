@@ -4,6 +4,7 @@ set -e  # Exit on any error
 # Suppress TensorFlow/TensorBoard C++ and oneDNN log noise
 export TF_CPP_MIN_LOG_LEVEL=3
 export TF_ENABLE_ONEDNN_OPTS=0
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 mkdir -p ./save/logs
 mkdir -p ./save/hints
@@ -11,7 +12,7 @@ mkdir -p ./save/models
 mkdir -p ./save/student_model
 
 echo "=========================================================================="
-echo "Starting FULL PURSUhInT + CMTF Pipeline for ImageNet-100"
+echo "Starting FULL PURSUhInT + BSAT Pipeline for ImageNet-100"
 echo "  (Teacher -> Hints -> Clustering -> Dual Student Training -> Evaluation)"
 echo "=========================================================================="
 
@@ -28,7 +29,7 @@ NUM_CLUSTERS=4                       # 4 hint points for ImageNet experiments
 METRIC="r2"
 TEACHER_EPOCHS=100
 STUDENT_EPOCHS=100
-BATCH=256                            # Lowered from 256 to prevent 24GB VRAM OOM
+BATCH=256
 NUM_WORKERS=8
 LR=0.1
 WEIGHT_DECAY=0.0001
@@ -43,7 +44,7 @@ HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_best"
 
 # Resume from a previous run (leave empty to start fresh)
 # Set to the student save directory, e.g.:
-# RESUME_DIR="./save/student_model/imagenet100/3,8,11,16/S-ResNet18_T-ResNet34_imagenet_pursuhint_cmtf_r-1.0_a-4.0_b-25.0_0"
+# RESUME_DIR="./save/student_model/imagenet100/3,8,11,16/S-ResNet18_T-ResNet34_imagenet_pursuhint_bsat_r-1.0_a-4.0_b-25.0_0"
 RESUME_DIR=""
 
 # Student training loss weights
@@ -51,12 +52,12 @@ GAMMA=1.0
 ALPHA=4.0
 BETA=25.0
 
-# CP / Tucker Rank Ratios and CMTF Rank
+# CP / Tucker Rank Ratios and BSAT Rank
 # (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
 CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
-CMTF_RANK=8
-CMTF_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual CMTF
+BSAT_RANK=8
+BSAT_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual BSAT
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
@@ -211,13 +212,13 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
-        --distill pursuhint_cmtf \
-        --dual_cmtf \
+        --distill pursuhint_bsat \
+        --dual_bsat \
         --trial ${TRIAL} \
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
-        --cmtf_rank ${CMTF_RANK} \
-        --cmtf_coupling_weight ${CMTF_COUPLING_WEIGHT} \
+        --bsat_rank ${BSAT_RANK} \
+        --bsat_coupling_weight ${BSAT_COUPLING_WEIGHT} \
         --epochs ${STUDENT_EPOCHS} \
         --lr ${LR} \
         --weight-decay ${WEIGHT_DECAY} \
@@ -245,7 +246,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
     echo "[5/5] Running Evaluation Metrics..."
     echo "[5/5] Running evaluation..." >> "${LOG}" 2>&1
 
-    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_cmtf_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_bsat_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \

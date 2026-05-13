@@ -6,7 +6,7 @@ set TF_CPP_MIN_LOG_LEVEL=3
 set TF_ENABLE_ONEDNN_OPTS=0
 
 echo ==========================================================================
-echo Starting FULL PURSUhInT + CMTF Pipeline (Teacher - Hints - Student - Eval)
+echo Starting FULL PURSUhInT + BSAT Pipeline (Teacher - Hints - Student - Eval)
 echo ==========================================================================
 
 if not exist ".\save\logs" mkdir ".\save\logs"
@@ -41,13 +41,13 @@ set ALPHA=4.0
 set BETA=25.0
 
 REM ============================================================
-REM CP / Tucker Rank Ratios and CMTF Rank
+REM CP / Tucker Rank Ratios and BSAT Rank
 REM (used when ENABLE_VBMF=0; ignored for rank selection when ENABLE_VBMF=1)
 REM ============================================================
 set CP_RANK_RATIO=0.5
 set TUCKER_RANK_RATIO=0.25
-set CMTF_RANK=8
-set CMTF_COUPLING_WEIGHT=1.0
+set BSAT_RANK=8
+set BSAT_COUPLING_WEIGHT=1.0
 
 REM ============================================================
 REM VBMF automatic rank selection (1=on, 0=off)
@@ -161,13 +161,13 @@ set TRAIN_CMD=%PYTHON% train_student.py ^
     --model_s %MODEL_S% ^
     --model_t %MODEL_T% ^
     --path_t %TEACHER_PATH% ^
-    --distill pursuhint_cmtf ^
-    --dual_cmtf ^
+    --distill pursuhint_bsat ^
+    --dual_bsat ^
     --trial %TRIAL% ^
     --cp_rank_ratio %CP_RANK_RATIO% ^
     --tucker_rank_ratio %TUCKER_RANK_RATIO% ^
-    --cmtf_rank %CMTF_RANK% ^
-    --cmtf_coupling_weight %CMTF_COUPLING_WEIGHT% ^
+    --bsat_rank %BSAT_RANK% ^
+    --bsat_coupling_weight %BSAT_COUPLING_WEIGHT% ^
     --epochs %EPOCHS% ^
     --learning_rate %LEARNING_RATE% ^
     --weight_decay %WEIGHT_DECAY% ^
@@ -190,7 +190,7 @@ REM ============================================================
 echo [5/5] Running Evaluation Metrics...
 
 REM We must use delayed expansion (!HINT_POINTS!) because the hint variable is loaded dynamically
-set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODEL_T%_%DATASET%_pursuhint_cmtf_r-%GAMMA%_a-%ALPHA%_b-%BETA%_b2-1.0_%TRIAL%
+set STUDENT_DIR=.\save\student_model\%DATASET%\!HINT_POINTS!\S-%MODEL_S%_T-%MODEL_T%_%DATASET%_pursuhint_bsat_r-%GAMMA%_a-%ALPHA%_b-%BETA%_b2-1.0_%TRIAL%
 
 %PYTHON% evaluate_metrics.py ^
     --dataset %DATASET% ^

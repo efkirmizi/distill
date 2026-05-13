@@ -1,5 +1,5 @@
 # ==============================================================================
-# Starting FULL PURSUhInT + CMTF Pipeline for ImageNet-100 (Windows Version)
+# Starting FULL PURSUhInT + BSAT Pipeline for ImageNet-100 (Windows Version)
 # ==============================================================================
 $ErrorActionPreference = "Continue" # Let $LASTEXITCODE handle actual crashes
 
@@ -18,7 +18,7 @@ New-Item -ItemType Directory -Force -Path ".\save\models" | Out-Null
 New-Item -ItemType Directory -Force -Path ".\save\student_model" | Out-Null
 
 Write-Host "=========================================================================="
-Write-Host "Starting FULL PURSUhInT + CMTF Pipeline for ImageNet-100"
+Write-Host "Starting FULL PURSUhInT + BSAT Pipeline for ImageNet-100"
 Write-Host "  (Teacher -> Hints -> Clustering -> Dual Student Training -> Evaluation)"
 Write-Host "=========================================================================="
 
@@ -53,12 +53,12 @@ $GAMMA = "1.0"
 $ALPHA = "4.0"
 $BETA = "25.0"
 
-# CP / Tucker Rank Ratios and CMTF Rank
+# CP / Tucker Rank Ratios and BSAT Rank
 # (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
 $CP_RANK_RATIO = 0.5
 $TUCKER_RANK_RATIO = 0.25
-$CMTF_RANK = 8
-$CMTF_COUPLING_WEIGHT = 1.0       # weight for Tucker←CP coupling term in dual CMTF
+$BSAT_RANK = 8
+$BSAT_COUPLING_WEIGHT = 1.0       # weight for Tucker←CP coupling term in dual BSAT
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 $USE_VBMF = 1
@@ -196,13 +196,13 @@ if ($RUN_TRAINING -eq 1) {
         "--model_s", $MODEL_S,
         "--model_t", $MODEL_T,
         "--path_t", $TEACHER_PATH,
-        "--distill", "pursuhint_cmtf",
-        "--dual_cmtf",
+        "--distill", "pursuhint_bsat",
+        "--dual_bsat",
         "--trial", $TRIAL,
         "--cp_rank_ratio", $CP_RANK_RATIO,
         "--tucker_rank_ratio", $TUCKER_RANK_RATIO,
-        "--cmtf_rank", $CMTF_RANK,
-        "--cmtf_coupling_weight", $CMTF_COUPLING_WEIGHT,
+        "--bsat_rank", $BSAT_RANK,
+        "--bsat_coupling_weight", $BSAT_COUPLING_WEIGHT,
         "--epochs", $STUDENT_EPOCHS,
         "--lr", $LR,
         "--weight-decay", $WEIGHT_DECAY,
@@ -251,7 +251,7 @@ if ($RUN_EVALUATION -eq 1) {
     Write-Host "[5/5] Running Evaluation Metrics..."
     "[5/5] Running evaluation..." | Out-File -FilePath $LOG -Append
 
-    $STUDENT_DIR = ".\save\student_model\imagenet100\${HINT_POINTS}\S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_cmtf_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    $STUDENT_DIR = ".\save\student_model\imagenet100\${HINT_POINTS}\S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_bsat_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
 
     $EVAL_ARGS = @(
         "evaluate_metrics.py",

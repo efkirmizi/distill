@@ -152,7 +152,7 @@ def _vbmf_rank_map_from_teacher(student_model, teacher_model, method):
 class CPConv2d(nn.Module):
     """
     Custom Module to replace Conv2d.
-    Exposes the individual factor weights for the Coupled Tensor Loss (CMTF).
+    Exposes the individual factor weights for the BSAT loss.
     """
     def __init__(self, layer, rank):
         super().__init__()
@@ -209,7 +209,7 @@ class CPConv2d(nn.Module):
         return x
     
     def get_factors(self):
-        """Returns the factor weights for the CMTF loss function"""
+        """Returns the factor weights for the BSAT loss function"""
         return [self.pointwise_in.weight, self.depthwise_h.weight, 
                 self.depthwise_w.weight, self.pointwise_out.weight]
 
@@ -264,7 +264,7 @@ class TuckerConv2d(nn.Module):
         return x
     
     def get_factors(self):
-        """Returns the core and factor weights for the CMTF loss function"""
+        """Returns the core and factor weights for the BSAT loss function"""
         return [self.pointwise_in.weight, self.core_conv.weight, self.pointwise_out.weight]
 
 

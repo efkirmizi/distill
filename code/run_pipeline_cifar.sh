@@ -11,7 +11,7 @@ mkdir -p ./save/models
 mkdir -p ./save/student_model
 
 echo "=========================================================================="
-echo "Starting FULL PURSUhInT + CMTF Pipeline for CIFAR-100"
+echo "Starting FULL PURSUhInT + BSAT Pipeline for CIFAR-100"
 echo "  (Teacher -> Hints -> Clustering -> Dual Student Training -> Evaluation)"
 echo "=========================================================================="
 
@@ -43,12 +43,12 @@ GAMMA=1.0
 ALPHA=4.0
 BETA=25.0
 
-# CP / Tucker Rank Ratios and CMTF Rank
+# CP / Tucker Rank Ratios and BSAT Rank
 # (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
 CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
-CMTF_RANK=8
-CMTF_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual CMTF
+BSAT_RANK=8
+BSAT_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual BSAT
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
@@ -183,13 +183,13 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
-        --distill pursuhint_cmtf \
-        --dual_cmtf \
+        --distill pursuhint_bsat \
+        --dual_bsat \
         --trial ${TRIAL} \
         --cp_rank_ratio ${CP_RANK_RATIO} \
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
-        --cmtf_rank ${CMTF_RANK} \
-        --cmtf_coupling_weight ${CMTF_COUPLING_WEIGHT} \
+        --bsat_rank ${BSAT_RANK} \
+        --bsat_coupling_weight ${BSAT_COUPLING_WEIGHT} \
         --epochs ${EPOCHS} \
         --learning_rate ${LR} \
         --weight_decay ${WEIGHT_DECAY} \
@@ -213,7 +213,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
     echo "[5/5] Running evaluation..." >> "${LOG}" 2>&1
 
     # Format matches train_student.py output exactly
-    STUDENT_DIR="./save/student_model/${DATASET}/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_${DATASET}_pursuhint_cmtf_r-${GAMMA}_a-${ALPHA}_b-${BETA}_b2-1.0_${TRIAL}"
+    STUDENT_DIR="./save/student_model/${DATASET}/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_${DATASET}_pursuhint_bsat_r-${GAMMA}_a-${ALPHA}_b-${BETA}_b2-1.0_${TRIAL}"
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \

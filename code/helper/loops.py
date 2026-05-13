@@ -214,7 +214,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                 g_t = feat_t
                 loss_group = [c(f_s, f_t) for f_s, f_t, c in zip(g_s, g_t, criterion_kd)]
                 loss_kd = sum(loss_group)
-            elif opt.distill == 'pursuhint_cmtf':
+            elif opt.distill == 'pursuhint_bsat':
                 f_s = feat_s
                 f_t = feat_t
                 loss_kd, proj_cp = criterion_kd(
@@ -262,7 +262,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
 
         # ===================forward+backward Tucker student (dual mode)=====================
         if dual:
-            if opt.distill != 'pursuhint_cmtf':
+            if opt.distill != 'pursuhint_bsat':
                 with torch.amp.autocast('cuda', enabled=scaler_2 is not None):
                     feat_s2, logit_s2 = model_s2(input, is_feat=True, preact=preact)
                     feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
@@ -281,7 +281,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                     else:
                         loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
             else:
-                # pursuhint_cmtf: Tucker forward + bidirectional coupling already done inside the
+                # pursuhint_bsat: Tucker forward + bidirectional coupling already done inside the
                 # CP autocast block above; loss_cls_2, loss_div_2, loss_kd_2 are already set.
                 if loss_weighter_2 is not None:
                     loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)

@@ -1,7 +1,7 @@
 """
 The general training framework for ImageNet distillation experiments.
-Supports multiple distillation methods (kd, hint, attention, vid, WSL_att, pursuhint_cmtf),
-model decomposition (CP/Tucker), dual CMTF training, DALI/standard DataLoader backends,
+Supports multiple distillation methods (kd, hint, attention, vid, WSL_att, pursuhint_bsat),
+model decomposition (CP/Tucker), dual BSAT training, DALI/standard DataLoader backends,
 CSV/JSON logging, and configurable teacher/student architectures (ResNet18, ResNet34).
 
 CRD-based methods are NOT supported on ImageNet (require per-sample indices not available
@@ -13,8 +13,8 @@ Usage examples:
       --distill attention --alpha 0.5 --beta 0.01 --gamma 1 --lr 0.1 \
       --hint_points 2,6,11,15 /path/to/imagenet
 
-  # PURSUhInT CMTF with standard DataLoader (local debugging):
-  python train_stu_imagenet.py --distill pursuhint_cmtf --no_dali \
+  # PURSUhInT BSAT with standard DataLoader (local debugging):
+  python train_stu_imagenet.py --distill pursuhint_bsat --no_dali \
       --hint_points 2,6,11,15 /path/to/imagenet
 
   # Vanilla student training (no distillation):
@@ -60,7 +60,7 @@ from distiller_zoo.KD import DistillKLD
 from distiller_zoo.AT import Attention
 from distiller_zoo.VID import VIDLoss
 from distiller_zoo.WSL import WSLLoss
-from distiller_zoo.CMTF import CoupledTensorLoss
+from distiller_zoo.BSAT import CoupledTensorLoss
 
 # ---------- DALI (optional) ----------
 DALI_AVAILABLE = False
@@ -124,9 +124,9 @@ def parse():
     # Distillation
     parser.add_argument('--distill', type=str, default=None,
                         choices=['kd', 'hint', 'attention', 'vid',
-                                 'WSL_att', 'pursuhint_cmtf'],
+                                 'WSL_att', 'pursuhint_bsat'],
                         help='distillation method (omit for vanilla student training)')
-    parser.add_argument('--dual_cmtf', action='store_true',
+    parser.add_argument('--dual_bsat', action='store_true',
                         help='Train both CP and Tucker decomposed students simultaneously')
     parser.add_argument('--cp_rank_ratio', type=float, default=0.5,
                         help='compression ratio for CP decomposition')
@@ -134,10 +134,10 @@ def parse():
                         help='compression ratio for Tucker decomposition')
     parser.add_argument('--use_vbmf', action='store_true',
                         help='auto-select decomposition rank per layer via EVBMF instead of global ratio')
-    parser.add_argument('--cmtf_rank', type=int, default=8,
-                        help='SVD rank R for batch-subspace alignment in CMTF loss')
-    parser.add_argument('--cmtf_coupling_weight', type=float, default=1.0,
-                        help='weight for the Tucker←CP coupling term in dual CMTF mode')
+    parser.add_argument('--bsat_rank', type=int, default=8,
+                        help='SVD rank R for batch-subspace alignment in BSAT loss')
+    parser.add_argument('--bsat_coupling_weight', type=float, default=1.0,
+                        help='weight for the Tucker←CP coupling term in dual BSAT mode')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -368,8 +368,8 @@ def main():
     best_acc1_2 = 0
     args = parse()
 
-    if args.dual_cmtf and args.distill != 'pursuhint_cmtf':
-        raise ValueError("--dual_cmtf requires --distill pursuhint_cmtf")
+    if args.dual_bsat and args.distill != 'pursuhint_bsat':
+        raise ValueError("--dual_bsat requires --distill pursuhint_bsat")
 
     # ---- Test mode ----
     if args.test:
@@ -435,11 +435,11 @@ def main():
     # ---- Create student model ----
     model_s = model_dict[args.model_s](num_classes=n_cls)
 
-    if args.dual_cmtf:
+    if args.dual_bsat:
         model_s2 = copy.deepcopy(model_s)
 
-    # ---- Model decomposition for pursuhint_cmtf ----
-    if args.distill == 'pursuhint_cmtf':
+    # ---- Model decomposition for pursuhint_bsat ----
+    if args.distill == 'pursuhint_bsat':
         _teacher_for_vbmf = teacher if args.use_vbmf else None
         rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
         print(f"==> Decomposing student with CP factorization ({rank_desc})...")
@@ -448,7 +448,7 @@ def main():
                                   device='cuda')
         model_s.cuda()  # move BN/Linear/remaining non-Conv2d layers that decompose_model skipped
         gc.collect()
-        if args.dual_cmtf:
+        if args.dual_bsat:
             t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
             print(f"==> Decomposing parallel student with Tucker ({t_rank_desc})...")
             model_s2 = decompose_model(model_s2, method='tucker',
@@ -469,7 +469,7 @@ def main():
         else:
             model_s = model_s.cuda()
 
-    if args.dual_cmtf and not next(model_s2.parameters()).is_cuda:
+    if args.dual_bsat and not next(model_s2.parameters()).is_cuda:
         model_s2 = model_s2.cuda()
 
     # Move teacher to GPU after decomposition (VBMF runs on CPU)
@@ -480,7 +480,7 @@ def main():
     module_list = nn.ModuleList([model_s])
     trainable_list = nn.ModuleList([model_s])
 
-    if args.dual_cmtf:
+    if args.dual_bsat:
         module_list_2 = nn.ModuleList([model_s2])
         trainable_list_2 = nn.ModuleList([model_s2])
 
@@ -493,8 +493,8 @@ def main():
         else:
             criterion_div = DistillKLD(args.kd_T)
 
-        # -- Probe feature shapes for hint / vid / cmtf --
-        if args.distill in ['hint', 'vid', 'pursuhint_cmtf']:
+        # -- Probe feature shapes for hint / vid / bsat --
+        if args.distill in ['hint', 'vid', 'pursuhint_bsat']:
             probe_data = torch.randn(2, 3, 224, 224).cuda()
             model_s.eval()
             teacher.eval()
@@ -531,19 +531,19 @@ def main():
         elif args.distill == 'WSL_att':
             criterion_kd = Attention()
 
-        elif args.distill == 'pursuhint_cmtf':
-            criterion_kd = CoupledTensorLoss(rank=args.cmtf_rank,
-                                             coupling_weight=args.cmtf_coupling_weight)
-            if args.dual_cmtf:
-                criterion_kd_2 = CoupledTensorLoss(rank=args.cmtf_rank,
-                                                   coupling_weight=args.cmtf_coupling_weight)
+        elif args.distill == 'pursuhint_bsat':
+            criterion_kd = CoupledTensorLoss(rank=args.bsat_rank,
+                                             coupling_weight=args.bsat_coupling_weight)
+            if args.dual_bsat:
+                criterion_kd_2 = CoupledTensorLoss(rank=args.bsat_rank,
+                                                   coupling_weight=args.bsat_coupling_weight)
 
         else:
             raise NotImplementedError(args.distill)
 
         criterion_list = nn.ModuleList([criterion_cls, criterion_div, criterion_kd])
 
-        if args.dual_cmtf:
+        if args.dual_bsat:
             criterion_list_2 = nn.ModuleList([
                 criterion_cls, criterion_div, criterion_kd_2])
     else:
@@ -559,7 +559,7 @@ def main():
     loss_weighter_2 = None
     if args.dynamic_loss_weights:
         loss_weighter = DynamicLossWeighter(num_losses=3).cuda()
-        if args.dual_cmtf:
+        if args.dual_bsat:
             loss_weighter_2 = DynamicLossWeighter(num_losses=3).cuda()
 
     if args.dynamic_loss_weights:
@@ -567,7 +567,7 @@ def main():
             {'params': trainable_list.parameters(), 'weight_decay': args.weight_decay},
             {'params': loss_weighter.parameters(), 'weight_decay': 0.0, 'fix_lr': True},
         ], args.lr, momentum=args.momentum)
-        if args.dual_cmtf:
+        if args.dual_bsat:
             optimizer_2 = torch.optim.SGD([
                 {'params': trainable_list_2.parameters(), 'weight_decay': args.weight_decay},
                 {'params': loss_weighter_2.parameters(), 'weight_decay': 0.0, 'fix_lr': True},
@@ -576,7 +576,7 @@ def main():
         optimizer = torch.optim.SGD(trainable_list.parameters(), args.lr,
                                     momentum=args.momentum,
                                     weight_decay=args.weight_decay)
-        if args.dual_cmtf:
+        if args.dual_bsat:
             optimizer_2 = torch.optim.SGD(trainable_list_2.parameters(), args.lr,
                                           momentum=args.momentum,
                                           weight_decay=args.weight_decay)
@@ -584,7 +584,7 @@ def main():
     # Append teacher AFTER optimizer creation (avoid weight decay on teacher)
     if teacher is not None:
         module_list.append(teacher)
-        if args.dual_cmtf:
+        if args.dual_bsat:
             module_list_2.append(teacher)
 
     # ---- Apex AMP ----
@@ -593,7 +593,7 @@ def main():
                                             opt_level=args.opt_level,
                                             keep_batchnorm_fp32=args.keep_batchnorm_fp32,
                                             loss_scale=args.loss_scale)
-        if args.dual_cmtf:
+        if args.dual_bsat:
             model_s2, optimizer_2 = amp.initialize(model_s2, optimizer_2,
                                                    opt_level=args.opt_level,
                                                    keep_batchnorm_fp32=args.keep_batchnorm_fp32,
@@ -607,13 +607,13 @@ def main():
     if args.distributed:
         print('distributed training..')
         model_s = DDP(model_s, delay_allreduce=True)
-        if args.dual_cmtf:
+        if args.dual_bsat:
             model_s2 = DDP(model_s2, delay_allreduce=True)
 
     # ---- Compile student models ----
     if args.torch_compile:
         model_s = torch.compile(model_s, dynamic=True)
-        if args.dual_cmtf:
+        if args.dual_bsat:
             model_s2 = torch.compile(model_s2, dynamic=True)
         if teacher is not None:
             teacher = torch.compile(teacher, dynamic=True)
@@ -623,7 +623,7 @@ def main():
         if teacher is not None:
             module_list[-1] = teacher
             
-        if args.dual_cmtf:
+        if args.dual_bsat:
             module_list_2[0] = model_s2
             if teacher is not None:
                 module_list_2[-1] = teacher
@@ -649,7 +649,7 @@ def main():
                 print("=> no CP checkpoint found at '{}'".format(cp_path))
 
             # 2. Load Tucker Student
-            if args.dual_cmtf:
+            if args.dual_bsat:
                 if os.path.isfile(tk_path):
                     print("=> loading Tucker checkpoint '{}'".format(tk_path))
                     ckpt_tk = torch.load(tk_path, map_location=lambda storage, loc: storage.cuda(args.gpu))
@@ -726,7 +726,7 @@ def main():
             traindir, valdir, batch_size=args.batch_size, num_workers=args.workers)
 
     if args.evaluate:
-        if args.dual_cmtf:
+        if args.dual_bsat:
             validate(val_loader, model_s, criterion_cls, model_s2=model_s2)
         else:
             validate(val_loader, model_s, criterion_cls)
@@ -738,7 +738,7 @@ def main():
             args.model_t, sum(p.numel() for p in teacher.parameters())))
     print('Student ({}) parameters: {}'.format(
         args.model_s, sum(p.numel() for p in model_s.parameters())))
-    if args.dual_cmtf:
+    if args.dual_bsat:
         print('Student2 (Tucker) parameters: {}'.format(
             sum(p.numel() for p in model_s2.parameters())))
 
@@ -757,7 +757,7 @@ def main():
                                 'w_cls', 'w_div', 'w_kd'])
     print(f'CSV log: {csv_path_cp}')
 
-    if args.dual_cmtf:
+    if args.dual_bsat:
         csv_path_tk = os.path.join(args.save_folder, 'training_log_tucker.csv')
         write_header_tk = not os.path.exists(csv_path_tk) or not args.resume
         csv_file_tk = open(csv_path_tk, file_mode, newline='')
@@ -781,7 +781,7 @@ def main():
         # ---- Train ----
         time1 = time.time()
         if args.distill is not None:
-            if args.dual_cmtf:
+            if args.dual_bsat:
                 (avg_train_time, train_loss, train_p1, train_p5,
                  train_loss_cls, train_loss_div, train_loss_kd,
                  train_loss_2, train_p1_2, train_p5_2,
@@ -808,12 +808,12 @@ def main():
             print('Epoch {} | Total Time {:.2f}'.format(epoch, epoch_time))
             print('train_acc CP:', train_p1)
             print('train_loss CP:', train_loss)
-            if args.dual_cmtf:
+            if args.dual_bsat:
                 print('train_acc Tucker:', train_p1_2)
                 print('train_loss Tucker:', train_loss_2)
 
         # ---- Validate ----
-        if args.dual_cmtf:
+        if args.dual_bsat:
             acc1, acc5, acc1_2, acc5_2, test_loss, test_loss_2 = validate(val_loader, model_s, criterion_cls, model_s2=model_s2)
         else:
             acc1, acc5, test_loss = validate(val_loader, model_s, criterion_cls)
@@ -825,7 +825,7 @@ def main():
             print('test_acc CP:', acc1)
             print('test_loss CP:', test_loss)
             print('test_acc_top5 CP:', acc5)
-            if args.dual_cmtf:
+            if args.dual_bsat:
                 print('test_acc Tucker:', acc1_2)
                 print('test_loss Tucker:', test_loss_2)
                 print('test_acc_top5 Tucker:', acc5_2)
@@ -845,7 +845,7 @@ def main():
                 cp_ckpt['loss_weighter'] = loss_weighter.state_dict()
 
             # Build Tucker ckpt dict before any disk writes
-            if args.dual_cmtf:
+            if args.dual_bsat:
                 is_best_2 = acc1_2 > best_acc1_2
                 best_acc1_2 = max(acc1_2, best_acc1_2)
                 tk_ckpt = {
@@ -861,7 +861,7 @@ def main():
             # Save BOTH checkpoints before any CSV flush so a disk-full event
             # can't leave one checkpoint behind the other.
             save_checkpoint(cp_ckpt, is_best, args.save_folder, tag='cp')
-            if args.dual_cmtf:
+            if args.dual_bsat:
                 save_checkpoint(tk_ckpt, is_best_2, args.save_folder, tag='tucker')
 
             # CP stats + CSV
@@ -875,7 +875,7 @@ def main():
             csv_file_cp.flush()
 
             # Tucker stats + CSV
-            if args.dual_cmtf:
+            if args.dual_bsat:
                 ew2 = loss_weighter_2.effective_weights() if loss_weighter_2 is not None else [args.gamma, args.alpha, args.beta]
                 csv_writer_tk.writerow([
                     epoch, f'{current_lr:.6f}', f'{epoch_time:.2f}',
@@ -898,7 +898,7 @@ def main():
     # ---- Close CSVs ----
     csv_file_cp.close()
     print(f'CP training log saved to: {csv_path_cp}')
-    if args.dual_cmtf:
+    if args.dual_bsat:
         csv_file_tk.close()
         print(f'Tucker training log saved to: {csv_path_tk}')
 
@@ -906,7 +906,7 @@ def main():
     if args.local_rank == 0:
         torch.save({'opt': vars(args), 'model': model_s.state_dict()},
                     os.path.join(args.save_folder, f'{args.model_s}_last_cp.pth'))
-        if args.dual_cmtf:
+        if args.dual_bsat:
             torch.save({'opt': vars(args), 'model': model_s2.state_dict()},
                         os.path.join(args.save_folder, f'{args.model_s}_last_tucker.pth'))
 
@@ -926,14 +926,14 @@ def main():
         'beta': args.beta,
         'best_acc1_cp': round(best_acc1, 4),
     }
-    if args.distill == 'pursuhint_cmtf':
+    if args.distill == 'pursuhint_bsat':
         summary['cp_rank_ratio'] = args.cp_rank_ratio
         summary['use_vbmf'] = args.use_vbmf
     if args.dynamic_loss_weights and loss_weighter is not None:
         summary['dynamic_loss_weights'] = True
         w = loss_weighter.effective_weights()
         summary['final_weights_cp'] = {'cls': round(w[0], 6), 'div': round(w[1], 6), 'kd': round(w[2], 6)}
-    if args.dual_cmtf:
+    if args.dual_bsat:
         summary['tucker_rank_ratio'] = args.tucker_rank_ratio
         summary['best_acc1_tucker'] = round(best_acc1_2, 4)
         if args.dynamic_loss_weights and loss_weighter_2 is not None:
@@ -945,7 +945,7 @@ def main():
     print(f'Experiment summary saved to: {summary_path}')
 
     print('best CP accuracy:', best_acc1)
-    if args.dual_cmtf:
+    if args.dual_bsat:
         print('best Tucker accuracy:', best_acc1_2)
 
 
@@ -1076,7 +1076,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             loss_kd = criterion_kd(f_s, feat_t)
         elif args.distill in ['attention', 'WSL_att']: loss_kd = sum(criterion_kd(feat_s, feat_t))
         elif args.distill == 'vid': loss_kd = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s, feat_t, criterion_kd)])
-        elif args.distill == 'pursuhint_cmtf':
+        elif args.distill == 'pursuhint_bsat':
             loss_kd, proj_cp = criterion_kd(
                 [f.float() for f in feat_s],
                 [f.float() for f in feat_t]
@@ -1112,7 +1112,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
 
         # ---- Process Tucker Student ----
         if dual:
-            if args.distill != 'pursuhint_cmtf':
+            if args.distill != 'pursuhint_bsat':
                 feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t, target) if args.distill == 'WSL_att' else criterion_div_2(logit_s2, logit_t)
