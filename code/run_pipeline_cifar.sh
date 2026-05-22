@@ -20,16 +20,25 @@ echo "==========================================================================
 # ==============================================================================
 PYTHON="python3"
 DATASET="cifar100"
-MODEL_T="vgg13"
-MODEL_S="vgg8"
+MODEL_T="wrn_40_2"
+MODEL_S="wrn_16_2"
 TRIAL=0
-NUM_LAYERS=4                         # vgg13 has 4 pooling-separated blocks
+
+# Distillation method — change this to switch methods:
+#   pursuhint_bsat  GAMMA=1.0  ALPHA=4.0  BETA=25.0
+#   kd              GAMMA=1.0  ALPHA=4.0  BETA=0.0
+#   attention       GAMMA=1.0  ALPHA=4.0  BETA=1000.0
+#   hint            GAMMA=1.0  ALPHA=4.0  BETA=1000.0
+#   WSL_att         GAMMA=1.0  ALPHA=4.0  BETA=1000.0
+#   vid             GAMMA=1.0  ALPHA=4.0  BETA=1000.0
+DISTILL_METHOD="kd"
+NUM_LAYERS=18                         # vgg13 has 4 pooling-separated blocks
 NUM_CLUSTERS=3                       # must match vgg8 student's s_points (1,2,3)
 METRIC="r2"
-EPOCHS=240
+EPOCHS=1
 LR_DECAY_EPOCHS="150,180,210"
 BATCH=64
-NUM_WORKERS=8
+NUM_WORKERS=4
 LR=0.05
 WEIGHT_DECAY=0.0005                  # Standard CIFAR WD
 
@@ -41,7 +50,7 @@ HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_best"
 # Student training loss weights (Optimized 65/15/20 Split)
 GAMMA=1.0
 ALPHA=4.0
-BETA=25.0
+BETA=0.0
 
 # CP / Tucker Rank Ratios and BSAT Rank
 # (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
@@ -76,15 +85,15 @@ fi
 
 # Log file
 LOG_DIR="./save/logs"
-LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_pipeline.log"
+LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_${DISTILL_METHOD}_pipeline.log"
 echo "Log file: ${LOG}"
 
 # ==============================================================================
 # Flags  (set to 1 to enable, 0 to skip a step)
 # ==============================================================================
-RUN_TEACHER=1
-RUN_HINTS=1
-RUN_CLUSTERING=1
+RUN_TEACHER=0
+RUN_HINTS=0
+RUN_CLUSTERING=0
 RUN_TRAINING=1
 RUN_EVALUATION=1
 
@@ -183,7 +192,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
-        --distill pursuhint_bsat \
+        --distill ${DISTILL_METHOD} \
         --dual_bsat \
         --trial ${TRIAL} \
         --cp_rank_ratio ${CP_RANK_RATIO} \
@@ -213,7 +222,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
     echo "[5/5] Running evaluation..." >> "${LOG}" 2>&1
 
     # Format matches train_student.py output exactly
-    STUDENT_DIR="./save/student_model/${DATASET}/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_${DATASET}_pursuhint_bsat_r-${GAMMA}_a-${ALPHA}_b-${BETA}_b2-1.0_${TRIAL}"
+    STUDENT_DIR="./save/student_model/${DATASET}/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_${DATASET}_${DISTILL_METHOD}_r-${GAMMA}_a-${ALPHA}_b-${BETA}_b2-1.0_${TRIAL}"
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \

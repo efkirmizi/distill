@@ -65,6 +65,12 @@ def parse_option():
     # PyTorch model compile optimization
     parser.add_argument('--torch_compile', action='store_true')
 
+    # Skip decomposition (for KD / AT / FitNet / WSL baselines whose checkpoints
+    # are plain undecomposed students, not CP- or Tucker-factorised weights)
+    parser.add_argument('--no_decompose', action='store_true',
+                        help='Load student as plain architecture without decomposition '
+                             '(use for KD, AT, FitNet, WSL distillation methods)')
+
     # Output
     parser.add_argument('--save_path', type=str,
                         default=None,
@@ -239,30 +245,36 @@ def evaluate():
                                      val_loader, criterion, opt, device)
     results.append(teacher_result)
 
-    # ===== 2. Student Model — CP Decomposed =====
+    # ===== 2. Student Model — CP Decomposed (or plain for non-BSAT baselines) =====
     if opt.path_s_cp:
-        print(f"\n--- Evaluating Student (CP): {opt.model_s} ---")
-        student_cp = model_dict[opt.model_s](num_classes=n_cls)
-        student_cp = decompose_model(student_cp, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
-                                     use_vbmf=opt.use_vbmf,
-                                     teacher_model=teacher if opt.use_vbmf else None)
+        if opt.no_decompose:
+            print(f"\n--- Evaluating Student: {opt.model_s} ---")
+            student_cp = model_dict[opt.model_s](num_classes=n_cls)
+            student_label = f"Student ({opt.model_s})"
+        else:
+            print(f"\n--- Evaluating Student (CP): {opt.model_s} ---")
+            student_cp = model_dict[opt.model_s](num_classes=n_cls)
+            student_cp = decompose_model(student_cp, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
+                                         use_vbmf=opt.use_vbmf,
+                                         teacher_model=teacher if opt.use_vbmf else None)
+            rank_desc = "VBMF" if opt.use_vbmf else f"r={opt.cp_rank_ratio}"
+            student_label = f"Student CP ({opt.model_s}, {rank_desc})"
+
         student_cp = load_checkpoint(student_cp, opt.path_s_cp)
         if torch.cuda.is_available():
             student_cp = student_cp.cuda()
 
-        rank_desc = "VBMF" if opt.use_vbmf else f"r={opt.cp_rank_ratio}"
-        cp_result = evaluate_model(student_cp,
-                                    f"Student CP ({opt.model_s}, {rank_desc})",
-                                    val_loader, criterion, opt, device)
+        cp_result = evaluate_model(student_cp, student_label, val_loader, criterion, opt, device)
         results.append(cp_result)
 
     # ===== 3. Student Model — Tucker Decomposed =====
     if opt.path_s_tucker:
         print(f"\n--- Evaluating Student (Tucker): {opt.model_s} ---")
         student_tk = model_dict[opt.model_s](num_classes=n_cls)
-        student_tk = decompose_model(student_tk, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio,
-                                     use_vbmf=opt.use_vbmf,
-                                     teacher_model=teacher if opt.use_vbmf else None)
+        if not opt.no_decompose:
+            student_tk = decompose_model(student_tk, method='tucker', tucker_rank_ratio=opt.tucker_rank_ratio,
+                                         use_vbmf=opt.use_vbmf,
+                                         teacher_model=teacher if opt.use_vbmf else None)
         student_tk = load_checkpoint(student_tk, opt.path_s_tucker)
         if torch.cuda.is_available():
             student_tk = student_tk.cuda()

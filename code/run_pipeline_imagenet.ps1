@@ -28,7 +28,7 @@ Write-Host "====================================================================
 # Note: On Windows, the command is usually 'python' instead of 'python3'
 $PYTHON = "python" 
 $DATASET = "imagenet100"
-$MODEL_T = "ResNet50"
+$MODEL_T = "ResNet34"
 $MODEL_S = "ResNet18"
 $TRIAL = "1"
 $NUM_LAYERS = 16
@@ -41,6 +41,15 @@ $NUM_WORKERS = 0 # Note: Windows PyTorch may require lower workers if you hit IP
 $LR = 0.1
 $WEIGHT_DECAY = 0.0001
 
+# Distillation method — change this to switch methods:
+#   pursuhint_bsat  GAMMA=1.0  ALPHA=4.0  BETA=25.0
+#   kd              GAMMA=1.0  ALPHA=4.0  BETA=0.0
+#   attention       GAMMA=1.0  ALPHA=4.0  BETA=1000.0
+#   hint            GAMMA=1.0  ALPHA=4.0  BETA=1000.0
+#   WSL_att         GAMMA=1.0  ALPHA=4.0  BETA=1000.0
+#   vid
+$DISTILL_METHOD = "vid"
+
 # Paths
 $IMAGENET_DIR = "data\imagenet_tiny"
 
@@ -48,10 +57,10 @@ $TEACHER_SAVE_DIR = ".\save\models\${MODEL_T}_imagenet100_lr_${LR}_decay_${WEIGH
 $TEACHER_PATH = "${TEACHER_SAVE_DIR}\${MODEL_T}_best.pth"
 $HINTS_DIR = ".\save\hints\${MODEL_T}_${DATASET}_best"
 
-# Student training loss weights
+# Student training loss weights (see DISTILL_METHOD comments above)
 $GAMMA = "1.0"
 $ALPHA = "4.0"
-$BETA = "25.0"
+$BETA = "1000.0"
 
 # CP / Tucker Rank Ratios and BSAT Rank
 # (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
@@ -66,7 +75,7 @@ $USE_VBMF = 1
 # Log file
 $LOG_DIR = ".\save\logs"
 New-Item -ItemType Directory -Force -Path $LOG_DIR | Out-Null
-$LOG = "${LOG_DIR}\${MODEL_T}_${DATASET}_pipeline.log"
+$LOG = "${LOG_DIR}\${MODEL_T}_${DATASET}_${DISTILL_METHOD}_pipeline.log"
 Write-Host "Log file: $LOG"
 
 # ==============================================================================
@@ -196,7 +205,7 @@ if ($RUN_TRAINING -eq 1) {
         "--model_s", $MODEL_S,
         "--model_t", $MODEL_T,
         "--path_t", $TEACHER_PATH,
-        "--distill", "pursuhint_bsat",
+        "--distill", $DISTILL_METHOD,
         "--dual_bsat",
         "--trial", $TRIAL,
         "--cp_rank_ratio", $CP_RANK_RATIO,
@@ -251,7 +260,7 @@ if ($RUN_EVALUATION -eq 1) {
     Write-Host "[5/5] Running Evaluation Metrics..."
     "[5/5] Running evaluation..." | Out-File -FilePath $LOG -Append
 
-    $STUDENT_DIR = ".\save\student_model\imagenet100\${HINT_POINTS}\S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_bsat_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    $STUDENT_DIR = ".\save\student_model\imagenet100\${HINT_POINTS}\S-${MODEL_S}_T-${MODEL_T}_imagenet_${DISTILL_METHOD}_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
 
     $EVAL_ARGS = @(
         "evaluate_metrics.py",

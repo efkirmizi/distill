@@ -237,7 +237,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             else:
                 raise NotImplementedError(opt.distill)
 
-            if loss_weighter is not None:
+            if loss_weighter is not None and opt.distill != 'kd':
                 loss = loss_weighter(loss_cls, loss_div, loss_kd)
             else:
                 loss = opt.gamma * loss_cls + opt.alpha * loss_div + opt.beta * loss_kd
@@ -268,15 +268,19 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                     feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
 
                     loss_cls_2 = criterion_cls_2(logit_s2, target)
-                    loss_div_2 = criterion_div_2(logit_s2, logit_t)
+                    loss_div_2 = criterion_div_2(logit_s2, logit_t, target) if opt.distill == 'WSL_att' else criterion_div_2(logit_s2, logit_t)
 
-                    loss_kd_2 = criterion_kd_2(
-                        [f.float() for f in feat_s2],
-                        [f.float() for f in feat_t],
-                    )
-                    if isinstance(loss_kd_2, (tuple, list)):
-                        loss_kd_2 = loss_kd_2[0]
-                    if loss_weighter_2 is not None:
+                    if opt.distill == 'kd':
+                        loss_kd_2 = torch.tensor(0.0, device=input.device)
+                    elif opt.distill == 'hint':
+                        f_s2 = [module_list_2[1+i](feat_s2[i]) for i in range(len(feat_s2))]
+                        loss_kd_2 = criterion_kd_2(f_s2, feat_t)
+                    elif opt.distill in ['attention', 'WSL_att']:
+                        loss_kd_2 = sum(criterion_kd_2(feat_s2, feat_t))
+                    elif opt.distill == 'vid':
+                        loss_kd_2 = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s2, feat_t, criterion_kd_2)])
+
+                    if loss_weighter_2 is not None and opt.distill != 'kd':
                         loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
                     else:
                         loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2

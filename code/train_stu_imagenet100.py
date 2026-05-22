@@ -368,8 +368,8 @@ def main():
     best_acc1_2 = 0
     args = parse()
 
-    if args.dual_bsat and args.distill != 'pursuhint_bsat':
-        raise ValueError("--dual_bsat requires --distill pursuhint_bsat")
+    if args.dual_bsat and args.distill is None:
+        raise ValueError("--dual_bsat requires a --distill method")
 
     # ---- Test mode ----
     if args.test:
@@ -438,15 +438,15 @@ def main():
     if args.dual_bsat:
         model_s2 = copy.deepcopy(model_s)
 
-    # ---- Model decomposition for pursuhint_bsat ----
-    if args.distill == 'pursuhint_bsat':
+    # ---- Model decomposition: runs for pursuhint_bsat OR any dual-student mode ----
+    if args.distill == 'pursuhint_bsat' or args.dual_bsat:
         _teacher_for_vbmf = teacher if args.use_vbmf else None
         rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
         print(f"==> Decomposing student with CP factorization ({rank_desc})...")
         model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
                                   use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
                                   device='cuda')
-        model_s.cuda()  # move BN/Linear/remaining non-Conv2d layers that decompose_model skipped
+        model_s.cuda()
         gc.collect()
         if args.dual_bsat:
             t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
@@ -455,7 +455,7 @@ def main():
                                        tucker_rank_ratio=args.tucker_rank_ratio,
                                        use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
                                        device='cuda')
-            model_s2.cuda()  # same for Tucker student
+            model_s2.cuda()
             gc.collect()
 
     if args.sync_bn:
@@ -513,7 +513,7 @@ def main():
             s_shapes = [f.shape for f in feat_s_probe]
             t_shapes = [f.shape for f in feat_t_probe]
             for i in range(len(t_shapes)):
-                regress_s = ConvReg(s_shapes[i], t_shapes[i])
+                regress_s = ConvReg(s_shapes[i], t_shapes[i]).cuda()
                 module_list.append(regress_s)
                 trainable_list.append(regress_s)
 
@@ -524,7 +524,7 @@ def main():
             s_n = [f.shape[1] for f in feat_s_probe]
             t_n = [f.shape[1] for f in feat_t_probe]
             criterion_kd = nn.ModuleList(
-                [VIDLoss(s, t, t) for s, t in zip(s_n, t_n)]
+                [VIDLoss(s, t, t).cuda() for s, t in zip(s_n, t_n)]
             )
             trainable_list.append(criterion_kd)
 
@@ -540,6 +540,34 @@ def main():
 
         else:
             raise NotImplementedError(args.distill)
+
+        # For non-BSAT dual mode: initialize criterion_kd_2 and (for hint/vid) Tucker modules.
+        if args.dual_bsat and args.distill != 'pursuhint_bsat':
+            if args.distill == 'kd':
+                criterion_kd_2 = DistillKLD(args.kd_T)
+            elif args.distill in ['attention', 'WSL_att']:
+                criterion_kd_2 = Attention()
+            elif args.distill == 'hint':
+                criterion_kd_2 = HintLoss()
+                model_s2.eval()
+                with torch.no_grad():
+                    feat_s2_probe, _ = model_s2(probe_data, is_feat=True, preact=args.preact,
+                                                 hint_points=args.s_points)
+                for i in range(len(t_shapes)):
+                    regress_s2 = ConvReg(feat_s2_probe[i].shape, t_shapes[i]).cuda()
+                    module_list_2.append(regress_s2)
+                    trainable_list_2.append(regress_s2)
+            elif args.distill == 'vid':
+                # Tucker may have different channel dims — probe separately.
+                model_s2.eval()
+                with torch.no_grad():
+                    feat_s2_probe, _ = model_s2(probe_data, is_feat=True, preact=args.preact,
+                                                 hint_points=args.s_points)
+                s_n_2 = [f.shape[1] for f in feat_s2_probe]
+                criterion_kd_2 = nn.ModuleList(
+                    [VIDLoss(s, t, t).cuda() for s, t in zip(s_n_2, t_n)]
+                )
+                trainable_list_2.append(criterion_kd_2)
 
         criterion_list = nn.ModuleList([criterion_cls, criterion_div, criterion_kd])
 
@@ -926,7 +954,7 @@ def main():
         'beta': args.beta,
         'best_acc1_cp': round(best_acc1, 4),
     }
-    if args.distill == 'pursuhint_bsat':
+    if args.distill == 'pursuhint_bsat' or args.dual_bsat:
         summary['cp_rank_ratio'] = args.cp_rank_ratio
         summary['use_vbmf'] = args.use_vbmf
     if args.dynamic_loss_weights and loss_weighter is not None:
@@ -1095,7 +1123,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                     loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
         else: raise NotImplementedError(args.distill)
 
-        if loss_weighter is not None:
+        if loss_weighter is not None and args.distill != 'kd':
             loss = loss_weighter(loss_cls, loss_div, loss_kd)
         else:
             loss = args.gamma * loss_cls + args.alpha * loss_div + args.beta * loss_kd
@@ -1117,14 +1145,17 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t, target) if args.distill == 'WSL_att' else criterion_div_2(logit_s2, logit_t)
 
-                loss_kd_2 = criterion_kd_2(
-                    [f.float() for f in feat_s2],
-                    [f.float() for f in feat_t],
-                )
-                if isinstance(loss_kd_2, (tuple, list)):
-                    loss_kd_2 = loss_kd_2[0]
+                if args.distill == 'kd':
+                    loss_kd_2 = torch.tensor(0.0, device=inp.device)
+                elif args.distill in ['attention', 'WSL_att']:
+                    loss_kd_2 = sum(criterion_kd_2(feat_s2, feat_t))
+                elif args.distill == 'hint':
+                    f_s2 = [module_list_2[1 + j](feat_s2[j]) for j in range(len(feat_s2))]
+                    loss_kd_2 = criterion_kd_2(f_s2, feat_t)
+                elif args.distill == 'vid':
+                    loss_kd_2 = sum([c(f_s2, f_t) for f_s2, f_t, c in zip(feat_s2, feat_t, criterion_kd_2)])
 
-            if loss_weighter_2 is not None:
+            if loss_weighter_2 is not None and args.distill != 'kd':
                 loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
             else:
                 loss_2 = args.gamma * loss_cls_2 + args.alpha * loss_div_2 + args.beta * loss_kd_2

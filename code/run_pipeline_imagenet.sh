@@ -12,8 +12,8 @@ mkdir -p ./save/models
 mkdir -p ./save/student_model
 
 echo "=========================================================================="
-echo "Starting FULL PURSUhInT + BSAT Pipeline for ImageNet-100"
-echo "  (Teacher -> Hints -> Clustering -> Dual Student Training -> Evaluation)"
+echo "Starting ImageNet-100 Distillation Pipeline"
+echo "  (Teacher -> [Hints -> Clustering] -> Student Training -> Evaluation)"
 echo "=========================================================================="
 
 # ==============================================================================
@@ -21,9 +21,31 @@ echo "==========================================================================
 # ==============================================================================
 PYTHON="python3"                     # or: /path/to/venv/bin/python
 DATASET="imagenet100"
-MODEL_T="ResNet50"
+MODEL_T="ResNet34"
 MODEL_S="ResNet18"
 TRIAL=0
+
+# ==============================================================================
+# Distillation method — choose one:
+#   pursuhint_bsat  : BSAT (AT + batch-subspace alignment + CP/Tucker coupling)
+#   kd              : Hinton KD (logit divergence only; beta irrelevant → set to 0)
+#   attention       : Attention Transfer
+#   hint            : FitNet intermediate-feature regression
+#   WSL_att         : Weighted Soft Labels + Attention
+#
+# All methods run the full pipeline: PURSUhInT hint selection (Steps 2-3),
+# EVBMF decomposition, dual CP+Tucker students, dynamic loss weighting.
+# Only the distillation criterion changes.
+#
+# Typical loss weights (GAMMA=CE, ALPHA=KL-div, BETA=criterion-specific):
+#   pursuhint_bsat: GAMMA=1.0  ALPHA=4.0  BETA=25.0   ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+#   kd:             GAMMA=1.0  ALPHA=4.0  BETA=0       ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+#   attention:      GAMMA=1.0  ALPHA=4.0  BETA=1000    ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+#   hint:           GAMMA=1.0  ALPHA=4.0  BETA=1000    ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+#   WSL_att:        GAMMA=1.0  ALPHA=4.0  BETA=1000    ENABLE_DYNAMIC_LOSS_WEIGHTS=1
+# ==============================================================================
+DISTILL_METHOD="pursuhint_bsat"
+
 NUM_LAYERS=16                        # ResNet50 has 16 Bottleneck sub-blocks ([3,4,6,3])
 NUM_CLUSTERS=4                       # 4 hint points for ImageNet experiments
 METRIC="r2"
@@ -43,21 +65,24 @@ TEACHER_PATH="${TEACHER_SAVE_DIR}/${MODEL_T}_best.pth"
 HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_best"
 
 # Resume from a previous run (leave empty to start fresh)
-# Set to the student save directory, e.g.:
-# RESUME_DIR="./save/student_model/imagenet100/3,8,11,16/S-ResNet18_T-ResNet34_imagenet_pursuhint_bsat_r-1.0_a-4.0_b-25.0_0"
 RESUME_DIR=""
 
-# Student training loss weights
+# Student training loss weights (see DISTILL_METHOD comments above for guidance)
 GAMMA=1.0
 ALPHA=4.0
 BETA=25.0
 
-# CP / Tucker Rank Ratios and BSAT Rank
-# (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
+# Hint points used when RUN_CLUSTERING=0 (or for non-BSAT methods)
+# ResNet34 teacher: "3,7,13,16"   ResNet50 teacher: "3,7,13,16"
+DEFAULT_HINT_POINTS="3,7,13,16"
+
+# ==============================================================================
+# Decomposition / dual-student settings (same for all distillation methods)
+# ==============================================================================
 CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
-BSAT_RANK=8
-BSAT_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual BSAT
+BSAT_RANK=8                       # only used by pursuhint_bsat criterion; harmless for others
+BSAT_COUPLING_WEIGHT=1.0          # only used by pursuhint_bsat criterion; harmless for others
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
@@ -86,7 +111,7 @@ fi
 # Log file
 LOG_DIR="./save/logs"
 mkdir -p "${LOG_DIR}"
-LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_pipeline.log"
+LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_${DISTILL_METHOD}_pipeline.log"
 echo "Log file: ${LOG}"
 
 # ==============================================================================
@@ -181,17 +206,16 @@ if [ "$RUN_CLUSTERING" -eq 1 ]; then
     echo "PURSUhInT selected hint points: ${HINT_POINTS}" | tee -a "${LOG}"
 else
     echo "[3/5] SKIPPED (RUN_CLUSTERING=0)"
-    # If skipping clustering, provide hint points manually here:
-    HINT_POINTS="3,7,13,16"
-    echo "Using default hint points: ${HINT_POINTS}"
+    HINT_POINTS="${DEFAULT_HINT_POINTS}"
+    echo "Using hint points: ${HINT_POINTS}"
 fi
 
 # ==============================================================================
 # [4/5] Train Dual Students (CP + Tucker) using discovered hint points
 # ==============================================================================
 if [ "$RUN_TRAINING" -eq 1 ]; then
-    echo "[4/5] Training Dual Students (${MODEL_S}) with hint points: ${HINT_POINTS}..."
-    echo "[4/5] Training students with hint_points=${HINT_POINTS}..." >> "${LOG}" 2>&1
+    echo "[4/5] Training Student (${MODEL_S}, ${DISTILL_METHOD}) with hint points: ${HINT_POINTS}..."
+    echo "[4/5] Training student (${DISTILL_METHOD}) with hint_points=${HINT_POINTS}..." >> "${LOG}" 2>&1
 
     DALI_FLAG=""
     if [ "$USE_NO_DALI" -eq 1 ]; then
@@ -212,7 +236,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
-        --distill pursuhint_bsat \
+        --distill ${DISTILL_METHOD} \
         --dual_bsat \
         --trial ${TRIAL} \
         --cp_rank_ratio ${CP_RANK_RATIO} \
@@ -246,7 +270,7 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
     echo "[5/5] Running Evaluation Metrics..."
     echo "[5/5] Running evaluation..." >> "${LOG}" 2>&1
 
-    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_pursuhint_bsat_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_${DISTILL_METHOD}_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \
@@ -269,5 +293,5 @@ fi
 echo ""
 echo "============================================================"
 echo "Pipeline complete! Results logged to: ${LOG}"
-echo "PURSUhInT hint points used: ${HINT_POINTS}"
+echo "Method: ${DISTILL_METHOD} | Hint points: ${HINT_POINTS}"
 echo "============================================================"

@@ -148,9 +148,6 @@ def parse_option():
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
-    if opt.dual_bsat and opt.distill != 'pursuhint_bsat':
-        raise ValueError("--dual_bsat requires --distill pursuhint_bsat")
-
     if not opt.model_t:
         opt.model_t = get_teacher_name(opt.path_t)
 
@@ -251,7 +248,7 @@ def main():
     if opt.dual_bsat:
         model_s2 = copy.deepcopy(model_s)
 
-    if opt.distill == 'pursuhint_bsat':
+    if opt.distill == 'pursuhint_bsat' or opt.dual_bsat:
         _teacher_for_vbmf = model_t if opt.use_vbmf else None
         rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.cp_rank_ratio}"
         print(f"==> Decomposing student model with CP factorization ({rank_desc})...")
@@ -454,6 +451,27 @@ def main():
                                                coupling_weight=opt.bsat_coupling_weight)
     else:
         raise NotImplementedError(opt.distill)
+
+    # For non-BSAT dual mode: initialize criterion_kd_2 and Tucker ConvRegs/VIDLoss modules.
+    if opt.dual_bsat and opt.distill != 'pursuhint_bsat':
+        if opt.distill == 'kd':
+            criterion_kd_2 = DistillKLD(opt.kd_T)
+        elif opt.distill in ['attention', 'WSL_att']:
+            criterion_kd_2 = Attention()
+        elif opt.distill == 'hint':
+            criterion_kd_2 = HintLoss()
+            s_shapes_2 = [f.shape for f in feat_s2]
+            for i in range(len(t_shapes)):
+                regress_s2 = ConvReg(s_shapes_2[i], t_shapes[i])
+                module_list_2.append(regress_s2)
+                trainable_list_2.append(regress_s2)
+        elif opt.distill == 'vid':
+            s_n_2 = [f.shape[1] for f in feat_s2]
+            t_n_vid = [f.shape[1] for f in feat_t]
+            criterion_kd_2 = nn.ModuleList(
+                [VIDLoss(s, t, t) for s, t in zip(s_n_2, t_n_vid)]
+            )
+            trainable_list_2.append(criterion_kd_2)
 
     criterion_list = nn.ModuleList([])
     criterion_list.append(criterion_cls)    # classification loss
