@@ -83,6 +83,15 @@ else
     DYNAMIC_LOSS_WEIGHTS=""
 fi
 
+# Skip teacher output precomputation — compute on-the-fly each batch.
+# Use when running multiple parallel jobs to avoid RAM contention (~10-15% slower).
+NO_TEACHER_CACHE=0
+if [ "$NO_TEACHER_CACHE" -eq 1 ]; then
+    NO_TEACHER_CACHE_FLAG="--no_teacher_cache"
+else
+    NO_TEACHER_CACHE_FLAG=""
+fi
+
 # Log file
 LOG_DIR="./save/logs"
 LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_${DISTILL_METHOD}_pipeline.log"
@@ -207,7 +216,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --num_workers ${NUM_WORKERS} \
         --hint_points "${HINT_POINTS}" \
         -r ${GAMMA} -a ${ALPHA} -b ${BETA} \
-        ${VBMF_FLAG} ${TORCH_COMPILE} ${DYNAMIC_LOSS_WEIGHTS} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
+        ${VBMF_FLAG} ${TORCH_COMPILE} ${DYNAMIC_LOSS_WEIGHTS} ${NO_TEACHER_CACHE_FLAG} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"
 else

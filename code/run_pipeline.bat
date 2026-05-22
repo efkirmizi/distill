@@ -71,6 +71,12 @@ REM ============================================================
 set ENABLE_DYNAMIC_LOSS_WEIGHTS=1
 
 REM ============================================================
+REM Skip teacher output precomputation — compute on-the-fly each batch.
+REM Use when running multiple parallel jobs to avoid RAM contention (~10-15% slower).
+REM ============================================================
+set ENABLE_NO_TEACHER_CACHE=0
+
+REM ============================================================
 REM PyTorch Compile Optimization (1=on, 0=off)
 REM ============================================================
 set ENABLE_TORCH_COMPILE=0
@@ -95,6 +101,7 @@ set EXTRA_FLAGS=
 if %ENABLE_DYNAMIC_LOSS_WEIGHTS% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --dynamic_loss_weights
 if %ENABLE_VBMF% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --use_vbmf
 if %ENABLE_TORCH_COMPILE% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --torch_compile
+if %ENABLE_NO_TEACHER_CACHE% == 1 set EXTRA_FLAGS=%EXTRA_FLAGS% --no_teacher_cache
 
 set EVAL_FLAGS=
 if %ENABLE_VBMF% == 1 set EVAL_FLAGS=%EVAL_FLAGS% --use_vbmf
