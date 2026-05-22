@@ -129,6 +129,11 @@ def parse_option():
     # PyTorch model compile optimization
     parser.add_argument('--torch_compile', action='store_true')
 
+    # Teacher cache
+    parser.add_argument('--no_teacher_cache', action='store_true',
+                        help='Skip precomputing teacher outputs; compute on-the-fly each batch. '
+                             'Use when running multiple parallel jobs to avoid RAM contention.')
+
     # Dynamic loss weighting (Kendall et al. CVPR 2018)
     parser.add_argument('--dynamic_loss_weights', action='store_true',
                         help='Learn per-task loss weights via homoscedastic uncertainty '
@@ -549,63 +554,72 @@ def main():
         student2_acc, _, _ = validate(val_loader, model_s2, criterion_cls, opt)
         print('student Tucker accuracy: ', student2_acc)
 
-    print("==> Precomputing teacher outputs to save compute...")
-
-    precompute_loader = torch.utils.data.DataLoader(
-        train_loader.dataset, batch_size=opt.batch_size,
-        shuffle=False, num_workers=opt.num_workers, drop_last=False
-    )
-
-    n_data = len(train_loader.dataset)
-    hint_indices = [int(i) for i in opt.hint_points.split(',')]
-
-    # Estimate CPU RAM needed before committing: probe teacher with one sample
-    with torch.no_grad():
-        if opt.dataset in ['cifar10', 'cifar100']:
-            _probe = torch.randn(1, 3, 32, 32).cuda()
-        else:
-            _probe = torch.randn(1, 3, 224, 224).cuda()
-        _model_t_core = model_t.module if isinstance(model_t, nn.DataParallel) else model_t
-        _feats, _ = _model_t_core(_probe, is_feat=True, preact=opt.preact)
-        _feat_bytes = sum(n_data * _feats[hi].numel() * 4 for hi in hint_indices)
-        del _probe, _feats
-
-    _total_cache_gb = (_feat_bytes + n_data * n_cls * 4) / 1024 ** 3
-    _available_gb = psutil.virtual_memory().available / 1024 ** 3
-    _CACHE_LIMIT_GB = _available_gb * 0.75
-
-    if _total_cache_gb > _CACHE_LIMIT_GB:
-        print(f"==> Cache would need {_total_cache_gb:.1f} GB but only "
-              f"{_available_gb:.1f} GB RAM available; "
-              f"teacher features computed on-the-fly (no RAM overhead).")
+    if opt.no_teacher_cache:
+        print("==> --no_teacher_cache set; teacher outputs computed on-the-fly each batch.")
         teacher_cache = None
     else:
-        teacher_logits = torch.zeros(n_data, n_cls)
-        teacher_feats = None
+        print("==> Precomputing teacher outputs to save compute...")
 
-        model_t.eval()
+        precompute_loader = torch.utils.data.DataLoader(
+            train_loader.dataset, batch_size=opt.batch_size,
+            shuffle=False, num_workers=opt.num_workers, drop_last=False
+        )
+
+        n_data = len(train_loader.dataset)
+        hint_indices = [int(i) for i in opt.hint_points.split(',')]
+
+        # Estimate CPU RAM needed before committing: probe teacher with one sample
         with torch.no_grad():
-            for idx, data in enumerate(precompute_loader):
-                if opt.distill in ['crd', 'WSL_crd', 'ATT_crd']:
-                    input_t, _, index_t, _ = data
-                else:
-                    input_t, _, index_t = data
-                input_t = input_t.float().cuda()
-                with torch.amp.autocast('cuda', enabled=True):
-                    feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=opt.preact)
-                    feat_t_selected = [feat_t_batch[hi].detach().cpu() for hi in hint_indices]
-                    logit_t_batch = logit_t_batch.detach().cpu()
+            if opt.dataset in ['cifar10', 'cifar100']:
+                _probe = torch.randn(1, 3, 32, 32).cuda()
+            else:
+                _probe = torch.randn(1, 3, 224, 224).cuda()
+            _model_t_core = model_t.module if isinstance(model_t, nn.DataParallel) else model_t
+            _feats, _ = _model_t_core(_probe, is_feat=True, preact=opt.preact)
+            _feat_bytes = sum(n_data * _feats[hi].numel() * 4 for hi in hint_indices) if opt.distill != 'kd' else 0
+            del _probe, _feats
 
-                if teacher_feats is None:
-                    teacher_feats = [torch.zeros(n_data, *f.shape[1:]) for f in feat_t_selected]
+        _total_cache_gb = (_feat_bytes + n_data * n_cls * 4) / 1024 ** 3
+        _available_gb = psutil.virtual_memory().available / 1024 ** 3
+        _CACHE_LIMIT_GB = _available_gb * 0.75
 
-                teacher_logits[index_t] = logit_t_batch.float()
-                for hp_idx, f in enumerate(feat_t_selected):
-                    teacher_feats[hp_idx][index_t] = f.float()
+        if _total_cache_gb > _CACHE_LIMIT_GB:
+            print(f"==> Cache would need {_total_cache_gb:.1f} GB but only "
+                  f"{_available_gb:.1f} GB RAM available; "
+                  f"teacher features computed on-the-fly (no RAM overhead).")
+            teacher_cache = None
+        else:
+            teacher_logits = torch.zeros(n_data, n_cls)
+            teacher_feats = None
 
-        teacher_cache = (teacher_logits, teacher_feats)
-        print(f'==> Teacher cache ready: logits {teacher_logits.shape}, '
-              f'{len(teacher_feats)} feat tensors')
+            model_t.eval()
+            with torch.no_grad():
+                for _, data in enumerate(precompute_loader):
+                    if opt.distill in ['crd', 'WSL_crd', 'ATT_crd']:
+                        input_t, _, index_t, _ = data
+                    else:
+                        input_t, _, index_t = data
+                    input_t = input_t.float().cuda()
+                    with torch.amp.autocast('cuda', enabled=True):
+                        if opt.distill == 'kd':
+                            logit_t_batch = model_t(input_t)
+                        else:
+                            feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=opt.preact)
+                            feat_t_selected = [feat_t_batch[hi].detach().cpu() for hi in hint_indices]
+                        logit_t_batch = logit_t_batch.detach().cpu()
+
+                    if opt.distill != 'kd':
+                        if teacher_feats is None:
+                            teacher_feats = [torch.zeros(n_data, *f.shape[1:]) for f in feat_t_selected]
+                        for hp_idx, f in enumerate(feat_t_selected):
+                            teacher_feats[hp_idx][index_t] = f.float()
+
+                    teacher_logits[index_t] = logit_t_batch.float()
+
+            teacher_cache = (teacher_logits, teacher_feats if teacher_feats is not None else [])
+            n_feat_tensors = 0 if opt.distill == 'kd' else len(teacher_feats)
+            print(f'==> Teacher cache ready: logits {teacher_logits.shape}, '
+                  f'{n_feat_tensors} feat tensors')
 
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
 
