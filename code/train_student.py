@@ -623,9 +623,9 @@ def main():
 
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
 
-    scaler = torch.amp.GradScaler('cuda')
+    scaler = torch.amp.GradScaler('cuda', growth_factor=1.0, backoff_factor=1.0)
     if opt.dual_bsat:
-        scaler_2 = torch.amp.GradScaler('cuda')
+        scaler_2 = torch.amp.GradScaler('cuda', growth_factor=1.0, backoff_factor=1.0)
 
     # ---- Resume ----
     if opt.resume:
