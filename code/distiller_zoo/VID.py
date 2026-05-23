@@ -36,19 +36,21 @@ class VIDLoss(nn.Module):
         self.eps = eps
 
     def forward(self, input, target):
-        # pool for dimension match
-        if input.shape[2:] != target.shape[2:]:
-            target_size = (min(input.shape[2], target.shape[2]), min(input.shape[3], target.shape[3]))
-            if input.shape[2:] > target.shape[2:]:
-                input = F.adaptive_avg_pool2d(input, target_size)
-            else:
-                target = F.adaptive_avg_pool2d(target, target_size)
-        pred_mean = self.regressor(input).float()
-        target = target.float()
-        pred_var = torch.log(1.0+torch.exp(self.log_scale.float()))+self.eps
-        pred_var = pred_var.view(1, -1, 1, 1)
-        neg_log_prob = 0.5*(
-            (pred_mean-target)**2/pred_var+torch.log(pred_var)
-            )
-        loss = torch.mean(neg_log_prob)
+        with torch.amp.autocast('cuda', enabled=False):
+            input = input.float()
+            target = target.float()
+            # pool for dimension match
+            if input.shape[2:] != target.shape[2:]:
+                target_size = (min(input.shape[2], target.shape[2]), min(input.shape[3], target.shape[3]))
+                if input.shape[2:] > target.shape[2:]:
+                    input = F.adaptive_avg_pool2d(input, target_size)
+                else:
+                    target = F.adaptive_avg_pool2d(target, target_size)
+            pred_mean = self.regressor(input)
+            pred_var = torch.log(1.0+torch.exp(self.log_scale.float()))+self.eps
+            pred_var = pred_var.view(1, -1, 1, 1)
+            neg_log_prob = 0.5*(
+                (pred_mean-target)**2/pred_var+torch.log(pred_var)
+                )
+            loss = torch.mean(neg_log_prob)
         return loss
