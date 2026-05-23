@@ -94,7 +94,7 @@ fi
 
 # Log file
 LOG_DIR="./save/logs"
-LOG="${LOG_DIR}/${MODEL_T}_${DATASET}_${DISTILL_METHOD}_pipeline.log"
+LOG="${LOG_DIR}/${MODEL_T}_${MODEL_S}_${DATASET}_${DISTILL_METHOD}_pipeline.log"
 echo "Log file: ${LOG}"
 
 # ==============================================================================
