@@ -43,8 +43,9 @@ class VIDLoss(nn.Module):
                 input = F.adaptive_avg_pool2d(input, target_size)
             else:
                 target = F.adaptive_avg_pool2d(target, target_size)
-        pred_mean = self.regressor(input)
-        pred_var = torch.log(1.0+torch.exp(self.log_scale))+self.eps
+        pred_mean = self.regressor(input).float()
+        target = target.float()
+        pred_var = torch.log(1.0+torch.exp(self.log_scale.float()))+self.eps
         pred_var = pred_var.view(1, -1, 1, 1)
         neg_log_prob = 0.5*(
             (pred_mean-target)**2/pred_var+torch.log(pred_var)
