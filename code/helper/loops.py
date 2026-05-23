@@ -247,6 +247,8 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         # ===================backward CP=====================
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            [p for group in optimizer.param_groups for p in group['params']], max_norm=10.0)
         optimizer.step()
 
         # ===================forward+backward Tucker student (dual mode)=====================
@@ -290,6 +292,8 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
 
             optimizer_2.zero_grad()
             loss_2.backward()
+            torch.nn.utils.clip_grad_norm_(
+                [p for group in optimizer_2.param_groups for p in group['params']], max_norm=10.0)
             optimizer_2.step()
 
         # ===================meters=====================
