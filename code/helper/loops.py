@@ -162,7 +162,8 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                 with torch.no_grad():
                     feat_t, logit_t = model_t(input, is_feat=True, preact=preact)
                     feat_t = [feat_t[int(i)] for i in opt.hint_points.split(',')]
-                    feat_t = [f.detach() for f in feat_t]
+                    feat_t = [f.detach().float() for f in feat_t]
+                    logit_t = logit_t.detach().float()
 
             # cls + kl div
             loss_cls = criterion_cls(logit_s, target)
@@ -254,6 +255,11 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         optimizer.zero_grad()
         if scaler is not None:
             scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            for group in optimizer.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        p.grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
             scaler.step(optimizer)
             scaler.update()
         else:
@@ -303,6 +309,11 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             optimizer_2.zero_grad()
             if scaler_2 is not None:
                 scaler_2.scale(loss_2).backward()
+                scaler_2.unscale_(optimizer_2)
+                for group in optimizer_2.param_groups:
+                    for p in group['params']:
+                        if p.grad is not None:
+                            p.grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
                 scaler_2.step(optimizer_2)
                 scaler_2.update()
             else:
