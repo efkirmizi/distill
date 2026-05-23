@@ -623,10 +623,6 @@ def main():
 
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
 
-    scaler = torch.amp.GradScaler('cuda', growth_factor=2.0, backoff_factor=1.0, growth_interval=1_000_000)
-    if opt.dual_bsat:
-        scaler_2 = torch.amp.GradScaler('cuda', growth_factor=2.0, backoff_factor=1.0, growth_interval=1_000_000)
-
     # ---- Resume ----
     if opt.resume:
         cp_path = os.path.join(opt.resume, 'checkpoint_cp.pth')
@@ -638,7 +634,6 @@ def main():
             best_acc = ckpt.get('best_acc', 0.0)
             model_s.load_state_dict(ckpt['model'])
             optimizer.load_state_dict(ckpt['optimizer'])
-            scaler.load_state_dict(ckpt['scaler'])
             if loss_weighter is not None and 'loss_weighter' in ckpt:
                 loss_weighter.load_state_dict(ckpt['loss_weighter'])
             print(f"=> resumed from epoch {ckpt['epoch']}, best_acc={best_acc:.2f}")
@@ -656,7 +651,6 @@ def main():
                 best_acc_2 = ckpt2.get('best_acc', 0.0)
                 model_s2.load_state_dict(ckpt2['model'])
                 optimizer_2.load_state_dict(ckpt2['optimizer'])
-                scaler_2.load_state_dict(ckpt2['scaler'])
                 if loss_weighter_2 is not None and 'loss_weighter' in ckpt2:
                     loss_weighter_2.load_state_dict(ckpt2['loss_weighter'])
                 print(f"=> Tucker resumed from epoch {tk_epoch}, best_acc={best_acc_2:.2f}")
@@ -709,14 +703,14 @@ def main():
             (train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd,
              train_acc_2, train_acc_top5_2, train_loss_2, train_loss_cls_2, train_loss_div_2, train_loss_kd_2) = train(
                 epoch, train_loader, module_list, criterion_list, optimizer, opt,
-                scaler=scaler, teacher_cache=teacher_cache,
+                teacher_cache=teacher_cache,
                 module_list_2=module_list_2, criterion_list_2=criterion_list_2,
-                optimizer_2=optimizer_2, scaler_2=scaler_2,
+                optimizer_2=optimizer_2,
                 loss_weighter=loss_weighter, loss_weighter_2=loss_weighter_2)
         else:
             train_acc, train_acc_top5, train_loss, train_loss_cls, train_loss_div, train_loss_kd = train(
                 epoch, train_loader, module_list, criterion_list, optimizer, opt,
-                scaler=scaler, teacher_cache=teacher_cache,
+                teacher_cache=teacher_cache,
                 loss_weighter=loss_weighter)
         time2 = time.time()
         epoch_time = time2 - time1
@@ -806,7 +800,6 @@ def main():
             'epoch': epoch,
             'model': model_s.state_dict(),
             'optimizer': optimizer.state_dict(),
-            'scaler': scaler.state_dict(),
             'best_acc': best_acc,
         }
         if loss_weighter is not None:
@@ -818,7 +811,6 @@ def main():
                 'epoch': epoch,
                 'model': model_s2.state_dict(),
                 'optimizer': optimizer_2.state_dict(),
-                'scaler': scaler_2.state_dict(),
                 'best_acc': best_acc_2,
             }
             if loss_weighter_2 is not None:
