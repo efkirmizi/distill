@@ -68,7 +68,7 @@ else
 fi
 
 # PyTorch Compile Optimization ON/OFF
-ENABLE_TORCH_COMPILE=1
+ENABLE_TORCH_COMPILE=0
 if [ "$ENABLE_TORCH_COMPILE" -eq 1 ]; then
     TORCH_COMPILE="--torch_compile"
 else
@@ -85,7 +85,7 @@ fi
 
 # Skip teacher output precomputation — compute on-the-fly each batch.
 # Use when running multiple parallel jobs to avoid RAM contention (~10-15% slower).
-NO_TEACHER_CACHE=0
+NO_TEACHER_CACHE=1
 if [ "$NO_TEACHER_CACHE" -eq 1 ]; then
     NO_TEACHER_CACHE_FLAG="--no_teacher_cache"
 else

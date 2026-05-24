@@ -245,11 +245,15 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         top5.update(acc5[0], input.size(0))
 
         # ===================backward CP=====================
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(
-            [p for group in optimizer.param_groups for p in group['params']], max_norm=10.0)
-        optimizer.step()
+        if not torch.isfinite(loss):
+            print(f'WARNING: non-finite CP loss {loss.item()} at epoch {epoch} batch {idx}; skipping update.')
+            optimizer.zero_grad()
+        else:
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                [p for group in optimizer.param_groups for p in group['params']], max_norm=10.0)
+            optimizer.step()
 
         # ===================forward+backward Tucker student (dual mode)=====================
         if dual:
@@ -290,11 +294,15 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             top1_2.update(acc1_2[0], input.size(0))
             top5_2.update(acc5_2[0], input.size(0))
 
-            optimizer_2.zero_grad()
-            loss_2.backward()
-            torch.nn.utils.clip_grad_norm_(
-                [p for group in optimizer_2.param_groups for p in group['params']], max_norm=10.0)
-            optimizer_2.step()
+            if not torch.isfinite(loss_2):
+                print(f'WARNING: non-finite Tucker loss {loss_2.item()} at epoch {epoch} batch {idx}; skipping update.')
+                optimizer_2.zero_grad()
+            else:
+                optimizer_2.zero_grad()
+                loss_2.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    [p for group in optimizer_2.param_groups for p in group['params']], max_norm=10.0)
+                optimizer_2.step()
 
         # ===================meters=====================
         batch_time.update(time.time() - end)

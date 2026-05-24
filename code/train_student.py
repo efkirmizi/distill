@@ -600,13 +600,12 @@ def main():
                     else:
                         input_t, _, index_t = data
                     input_t = input_t.float().cuda()
-                    with torch.amp.autocast('cuda', enabled=True):
-                        if opt.distill == 'kd':
-                            logit_t_batch = model_t(input_t)
-                        else:
-                            feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=opt.preact)
-                            feat_t_selected = [feat_t_batch[hi].detach().cpu() for hi in hint_indices]
-                        logit_t_batch = logit_t_batch.detach().cpu()
+                    if opt.distill == 'kd':
+                        logit_t_batch = model_t(input_t)
+                    else:
+                        feat_t_batch, logit_t_batch = model_t(input_t, is_feat=True, preact=opt.preact)
+                        feat_t_selected = [feat_t_batch[hi].detach().cpu() for hi in hint_indices]
+                    logit_t_batch = logit_t_batch.detach().cpu()
 
                     if opt.distill != 'kd':
                         if teacher_feats is None:

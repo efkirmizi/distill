@@ -44,10 +44,13 @@ class VIDLoss(nn.Module):
             else:
                 target = F.adaptive_avg_pool2d(target, target_size)
         pred_mean = self.regressor(input)
-        pred_var = F.softplus(self.log_scale)+self.eps
+        # Clamp pred_var to a minimum of 0.1: prevents collapse toward eps where any
+        # non-trivial residual creates (residual^2 / tiny_var) -> inf gradient.
+        pred_var = torch.clamp(F.softplus(self.log_scale) + self.eps, min=0.1)
         pred_var = pred_var.view(1, -1, 1, 1)
-        neg_log_prob = 0.5*(
-            (pred_mean-target)**2/pred_var+torch.log(pred_var)
-            )
-        loss = torch.mean(neg_log_prob)
+        neg_log_prob = 0.5 * ((pred_mean - target)**2 / pred_var + torch.log(pred_var))
+        # Clamp per-element loss to prevent outlier spatial locations from producing
+        # inf/nan in backward. At optimum, neg_log_prob is in [-5, 5]; 50.0 only
+        # activates for pathological residual/variance ratios.
+        loss = torch.mean(neg_log_prob.clamp(max=50.0))
         return loss
