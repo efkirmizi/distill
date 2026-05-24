@@ -129,7 +129,6 @@ def main():
 
     # tensorboard
     logger = tb_logger.Logger(logdir=opt.tb_folder, flush_secs=2)
-    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
 
     # --- CSV Logger Setup ---
     csv_path = os.path.join(opt.save_folder, 'training_log.csv')
@@ -146,7 +145,7 @@ def main():
         print("==> training...")
 
         time1 = time.time()
-        train_acc, train_acc_top5, train_loss = train(epoch, train_loader, model, criterion, optimizer, opt, scaler=scaler)
+        train_acc, train_acc_top5, train_loss = train(epoch, train_loader, model, criterion, optimizer, opt)
         time2 = time.time()
         epoch_time = time2 - time1
         print('epoch {}, total time {:.2f}'.format(epoch, epoch_time))

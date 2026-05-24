@@ -44,13 +44,16 @@ class VIDLoss(nn.Module):
             else:
                 target = F.adaptive_avg_pool2d(target, target_size)
         pred_mean = self.regressor(input)
-        # Clamp pred_var to a minimum of 0.1: prevents collapse toward eps where any
-        # non-trivial residual creates (residual^2 / tiny_var) -> inf gradient.
-        pred_var = torch.clamp(F.softplus(self.log_scale) + self.eps, min=0.1)
+        # Clamp pred_var to a minimum of 1.0.
+        # Critical: log(pred_var) >= log(1.0) = 0 ensures neg_log_prob >= 0 always.
+        # With min=0.1, log(0.1)=-2.3 dominates once residuals are small, making the
+        # VID loss negative. A negative loss breaks DynamicLossWeighter (Kendall et al.)
+        # because its gradient w.r.t. log_vars is always positive when L_i<0, driving
+        # exp(-log_vars[i]) -> +inf and total loss -> -inf. min=1.0 closes this path.
+        pred_var = torch.clamp(F.softplus(self.log_scale) + self.eps, min=1.0)
         pred_var = pred_var.view(1, -1, 1, 1)
         neg_log_prob = 0.5 * ((pred_mean - target)**2 / pred_var + torch.log(pred_var))
-        # Clamp per-element loss to prevent outlier spatial locations from producing
-        # inf/nan in backward. At optimum, neg_log_prob is in [-5, 5]; 50.0 only
-        # activates for pathological residual/variance ratios.
+        # Clamp per-element max to prevent catastrophic spikes from large residuals
+        # early in training from corrupting weights through inf/nan gradients.
         loss = torch.mean(neg_log_prob.clamp(max=50.0))
         return loss
