@@ -84,6 +84,10 @@ TUCKER_RANK_RATIO=0.25
 BSAT_RANK=8                       # only used by pursuhint_bsat criterion; harmless for others
 BSAT_COUPLING_WEIGHT=1.0          # only used by pursuhint_bsat criterion; harmless for others
 
+# torchrun rendezvous port — change this to a different value for each parallel run
+# (each concurrent torchrun instance must use a unique port on the machine)
+MASTER_PORT=9200
+
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
 if [ "$USE_VBMF" -eq 1 ]; then
@@ -232,7 +236,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
     # Number of GPUs to use for training
     NUM_GPUS=1
 
-    torchrun --nproc_per_node=${NUM_GPUS} --master_port 9200 train_stu_imagenet100.py \
+    torchrun --nproc_per_node=${NUM_GPUS} --master_port ${MASTER_PORT} train_stu_imagenet100.py \
         --model_s ${MODEL_S} \
         --model_t ${MODEL_T} \
         --path_t "${TEACHER_PATH}" \
