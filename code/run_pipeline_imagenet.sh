@@ -83,6 +83,8 @@ CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
 BSAT_RANK=8                       # only used by pursuhint_bsat criterion; harmless for others
 BSAT_COUPLING_WEIGHT=1.0          # only used by pursuhint_bsat criterion; harmless for others
+AT_WEIGHT=1.0                     # spatial attention term weight in BSAT loss
+BSA_WEIGHT=0.5                    # batch-subspace CKA term weight in BSAT loss
 
 # torchrun rendezvous port — change this to a different value for each parallel run
 # (each concurrent torchrun instance must use a unique port on the machine)
@@ -247,6 +249,8 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
         --bsat_rank ${BSAT_RANK} \
         --bsat_coupling_weight ${BSAT_COUPLING_WEIGHT} \
+        --at_weight ${AT_WEIGHT} \
+        --bsa_weight ${BSA_WEIGHT} \
         --epochs ${STUDENT_EPOCHS} \
         --lr ${LR} \
         --weight-decay ${WEIGHT_DECAY} \

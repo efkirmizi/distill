@@ -10,78 +10,89 @@ class CoupledTensorLoss(nn.Module):
     Part 1 — Spatial Attention Matching (AT loss):
         Aligns per-sample spatial attention maps between student and teacher
         at each hint point. Sign of activations squared → channel-mean →
-        L2-normalised → MSE. Established, well-grounded signal.
+        L2-normalised → MSE. Weighted by at_weight.
 
-    Part 2 — Batch-Subspace Alignment:
-        Batch-unfolds each feature map into a B×(C·H·W) matrix, forms the
-        Gram matrix G = M Mᵀ (B×B), and computes the rank-R orthogonal
-        projector P = U Uᵀ via torch.linalg.eigh on G.
-        Minimises ‖P_student − P_teacher‖_F².  Sign-invariant (projector is
-        unique); no ALS/parafac; gradients flow cleanly through eigh.
+    Part 2 — Batch-Subspace CKA:
+        Batch-unfolds each feature map into a B×(C·H·W) matrix M, computes
+        orthonormal left singular vectors U via torch.linalg.svd (direct SVD
+        on M instead of eigendecomposing G=MMᵀ, halving the condition number),
+        then minimises the subspace CKA loss: 1 − ‖U_s^T U_t‖_F² / rank.
+        Bounded in [0,1]; scale-invariant; no LAPACK convergence issues.
+        Weighted by bsa_weight.
 
     Coupling term (dual-student mode):
-        When coupling_proj is supplied (CP student's projectors, detached),
+        When coupling_basis is supplied (CP student's SVD bases, detached),
         the Tucker student is additionally pulled toward the CP student's
-        batch subspace: coupling_weight · ‖P_tucker − P_cp‖_F².
-        This enforces a shared semantic latent space between architecturally
-        heterogeneous students without requiring matching channel/spatial dims.
+        batch subspace via the same CKA loss. Weighted by coupling_weight.
     """
 
-    def __init__(self, rank=8, coupling_weight=1.0, **kwargs):
+    def __init__(self, rank=8, at_weight=1.0, bsa_weight=0.5,
+                 coupling_weight=1.0, **kwargs):
         super(CoupledTensorLoss, self).__init__()
         self.rank = rank
+        self.at_weight = at_weight
+        self.bsa_weight = bsa_weight
         self.coupling_weight = coupling_weight
 
-    def _projection(self, feat):
+    def _svd_basis(self, feat):
         """
-        Rank-R batch-mode orthogonal projector from a feature map.
+        Rank-R orthonormal basis from a feature map via direct SVD.
 
         feat : B × C × H × W  (any shape with batch first)
-        returns : B × B  matrix  P = U Uᵀ,  where U holds the top-R left
-                  singular vectors of the batch-unfolded matrix B×(C·H·W).
+        returns : B × q  matrix U, the top-q left singular vectors of the
+                  batch-unfolded matrix B×D.
 
-        Implementation note: we eigendecompose the Gram matrix G = M Mᵀ (B×B)
-        rather than calling svd_lowrank on M directly.  The eigenvectors of G
-        are exactly the left singular vectors of M, and torch.linalg.eigh
-        (symmetric solver) is far more numerically stable than any SVD path
-        when the student features are near-constant early in training.
+        Uses torch.linalg.svd directly on M rather than eigendecomposing
+        G = M Mᵀ. This halves the effective condition number (κ(M) vs
+        κ(M)²) and avoids eigenvector instability when two singular values
+        are nearly equal late in training.
         """
         B = feat.shape[0]
-        M = feat.reshape(B, -1).float()          # B × D, force fp32
+        M = feat.reshape(B, -1).float()           # B × D, force fp32
         q = min(self.rank, B, M.shape[1])
 
-        # Frobenius-normalise: scaling M by a constant leaves U unchanged
-        # (SVD(M/c) = U @ (S/c) @ Vᵀ) but keeps the Gram matrix well-scaled.
         norm = M.norm()
         if norm > 0:
             M = M / norm
 
-        # Disable autocast: eigh requires fp32.
+        # Disable autocast: svd requires fp32.
         with torch.amp.autocast('cuda', enabled=False):
-            G = M @ M.t()                            # B × B, symmetric PSD
-            # Diagonal jitter: prevents eigh from failing on ill-conditioned G
-            # (near-duplicate eigenvalues cause LAPACK error 257 late in training).
-            G = G + 1e-6 * torch.eye(B, device=G.device, dtype=G.dtype)
-            # eigh returns eigenvalues in ascending order; take the last q columns.
-            U = torch.linalg.eigh(G).eigenvectors[:, -q:]   # B × q
-        return U @ U.t()                             # B × B
+            U, _, _ = torch.linalg.svd(M, full_matrices=False)
+            U = U[:, :q]                          # B × q
 
-    def forward(self, f_s, f_t, coupling_proj=None):
+        return U
+
+    @staticmethod
+    def _cka_loss(U_s, U_t):
+        """
+        Subspace CKA loss: 1 − ‖U_s^T U_t‖_F² / q.
+
+        U_s, U_t : B × q orthonormal matrices (left singular vectors).
+        Returns a scalar in [0, 1]; 0 when both subspaces are identical.
+        ‖U_s^T U_t‖_F² equals the sum of squared cosines of the principal
+        angles between the two rank-q subspaces.
+        """
+        q = U_s.shape[1]
+        overlap = torch.mm(U_s.t(), U_t)          # q × q
+        return 1.0 - (overlap ** 2).sum() / q
+
+    def forward(self, f_s, f_t, coupling_basis=None):
         """
         Args:
-            f_s           : list of student feature tensors, one per hint point
-            f_t           : list of teacher feature tensors, one per hint point
-            coupling_proj : list of B×B projection matrices from the CP student
-                            (detached).  When provided, adds coupling term to loss.
+            f_s            : list of student feature tensors (channel-adapted
+                             via ConvReg), one per hint point
+            f_t            : list of teacher feature tensors, one per hint point
+            coupling_basis : list of B×q SVD-basis matrices from the CP student
+                             (detached). When provided, adds CKA coupling term.
 
         Returns:
-            loss : scalar distillation loss
-            proj : list of B×B batch-mode projectors for f_s, one per hint point.
-                   Pass these (detached) as coupling_proj to the Tucker student.
+            loss  : scalar distillation loss
+            basis : list of B×q SVD bases for f_s, one per hint point.
+                    Pass these (detached) as coupling_basis to Tucker student.
         """
         device = f_s[0].device if f_s else torch.device('cpu')
         loss = torch.zeros(1, device=device).squeeze()
-        proj = []
+        basis = []
 
         for s, t in zip(f_s, f_t):
             B = s.shape[0]
@@ -92,17 +103,17 @@ class CoupledTensorLoss(nn.Module):
                 s_in = F.adaptive_avg_pool2d(s_in, t.shape[2:])
             s_att = F.normalize(s_in.pow(2).mean(1).view(B, -1), dim=1)
             t_att = F.normalize(t.pow(2).mean(1).view(B, -1), dim=1)
-            loss += F.mse_loss(s_att, t_att)
+            loss = loss + self.at_weight * F.mse_loss(s_att, t_att)
 
-            # ── Part 2: Batch-Subspace Alignment ─────────────────────────────
-            P_t = self._projection(t.detach())    # no grad through teacher
-            P_s = self._projection(s)             # grads flow to student
-            loss += F.mse_loss(P_s, P_t)
-            proj.append(P_s)
+            # ── Part 2: Batch-Subspace CKA ────────────────────────────────────
+            U_t = self._svd_basis(t.detach())     # no grad through teacher
+            U_s = self._svd_basis(s)              # grads flow to student
+            loss = loss + self.bsa_weight * self._cka_loss(U_s, U_t)
+            basis.append(U_s)
 
         # ── Coupling term (Tucker ← CP, CP side detached) ────────────────────
-        if coupling_proj is not None:
-            for P_s, P_cp in zip(proj, coupling_proj):
-                loss += self.coupling_weight * F.mse_loss(P_s, P_cp)
+        if coupling_basis is not None:
+            for U_s, U_cp in zip(basis, coupling_basis):
+                loss = loss + self.coupling_weight * self._cka_loss(U_s, U_cp.detach())
 
-        return loss, proj
+        return loss, basis

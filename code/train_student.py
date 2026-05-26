@@ -100,6 +100,10 @@ def parse_option():
                         help='SVD rank R for batch-subspace alignment in BSAT loss')
     parser.add_argument('--bsat_coupling_weight', type=float, default=1.0,
                         help='weight for the Tucker←CP coupling term in dual BSAT mode')
+    parser.add_argument('--at_weight', type=float, default=1.0,
+                        help='weight for the spatial attention (AT) term in BSAT loss')
+    parser.add_argument('--bsa_weight', type=float, default=0.5,
+                        help='weight for the batch-subspace CKA term in BSAT loss')
 
     parser.add_argument('-r', '--gamma', type=float, default=1, help='weight for classification')
     parser.add_argument('-a', '--alpha', type=float, default=None, help='weight balance for KD')
@@ -450,10 +454,25 @@ def main():
         trainable_list.append(criterion_kd)
     elif opt.distill == 'pursuhint_bsat':
         criterion_kd = CoupledTensorLoss(rank=opt.bsat_rank,
+                                         at_weight=opt.at_weight,
+                                         bsa_weight=opt.bsa_weight,
                                          coupling_weight=opt.bsat_coupling_weight)
+        s_shapes = [f.shape for f in feat_s]
+        t_shapes = [f.shape for f in feat_t]
+        for i in range(len(t_shapes)):
+            regress_s = ConvReg(s_shapes[i], t_shapes[i])
+            module_list.append(regress_s)
+            trainable_list.append(regress_s)
         if opt.dual_bsat:
             criterion_kd_2 = CoupledTensorLoss(rank=opt.bsat_rank,
+                                               at_weight=opt.at_weight,
+                                               bsa_weight=opt.bsa_weight,
                                                coupling_weight=opt.bsat_coupling_weight)
+            s_shapes_2 = [f.shape for f in feat_s2]
+            for i in range(len(t_shapes)):
+                regress_s2 = ConvReg(s_shapes_2[i], t_shapes[i])
+                module_list_2.append(regress_s2)
+                trainable_list_2.append(regress_s2)
     else:
         raise NotImplementedError(opt.distill)
 

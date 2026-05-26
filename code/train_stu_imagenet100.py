@@ -44,8 +44,6 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import torch.nn.functional as F
-
 import numpy as np
 import sys
 
@@ -138,6 +136,10 @@ def parse():
                         help='SVD rank R for batch-subspace alignment in BSAT loss')
     parser.add_argument('--bsat_coupling_weight', type=float, default=1.0,
                         help='weight for the Tucker←CP coupling term in dual BSAT mode')
+    parser.add_argument('--at_weight', type=float, default=1.0,
+                        help='weight for the spatial attention (AT) term in BSAT loss')
+    parser.add_argument('--bsa_weight', type=float, default=0.5,
+                        help='weight for the batch-subspace CKA term in BSAT loss')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -533,10 +535,29 @@ def main():
 
         elif args.distill == 'pursuhint_bsat':
             criterion_kd = CoupledTensorLoss(rank=args.bsat_rank,
+                                             at_weight=args.at_weight,
+                                             bsa_weight=args.bsa_weight,
                                              coupling_weight=args.bsat_coupling_weight)
+            s_shapes = [f.shape for f in feat_s_probe]
+            t_shapes = [f.shape for f in feat_t_probe]
+            for i in range(len(t_shapes)):
+                regress_s = ConvReg(s_shapes[i], t_shapes[i]).cuda()
+                module_list.append(regress_s)
+                trainable_list.append(regress_s)
             if args.dual_bsat:
                 criterion_kd_2 = CoupledTensorLoss(rank=args.bsat_rank,
+                                                   at_weight=args.at_weight,
+                                                   bsa_weight=args.bsa_weight,
                                                    coupling_weight=args.bsat_coupling_weight)
+                model_s2.eval()
+                with torch.no_grad():
+                    feat_s2_probe, _ = model_s2(probe_data, is_feat=True,
+                                                preact=args.preact,
+                                                hint_points=args.s_points)
+                for i in range(len(t_shapes)):
+                    regress_s2 = ConvReg(feat_s2_probe[i].shape, t_shapes[i]).cuda()
+                    module_list_2.append(regress_s2)
+                    trainable_list_2.append(regress_s2)
 
         else:
             raise NotImplementedError(args.distill)
@@ -900,7 +921,6 @@ def main():
                 f'{train_loss_cls:.4f}', f'{train_loss_div:.4f}', f'{train_loss_kd:.4f}',
                 f'{acc1:.3f}', f'{acc5:.3f}', f'{test_loss:.4f}', f'{best_acc1:.3f}',
                 f'{ew[0]:.6f}', f'{ew[1]:.6f}', f'{ew[2]:.6f}'])
-            csv_file_cp.flush()
 
             # Tucker stats + CSV
             if args.dual_bsat:
@@ -911,7 +931,6 @@ def main():
                     f'{train_loss_cls_2:.4f}', f'{train_loss_div_2:.4f}', f'{train_loss_kd_2:.4f}',
                     f'{acc1_2:.3f}', f'{acc5_2:.3f}', f'{test_loss_2:.4f}', f'{best_acc1_2:.3f}',
                     f'{ew2[0]:.6f}', f'{ew2[1]:.6f}', f'{ew2[2]:.6f}'])
-                csv_file_tk.flush()
 
             if epoch == args.epochs - 1:
                 print('##Top-1 {0}\n##Top-5 {1}\n##Perf  {2}'.format(
@@ -1097,7 +1116,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         loss_cls = criterion_cls(logit_s, target)
         loss_div = criterion_div(logit_s, logit_t, target) if args.distill == 'WSL_att' else criterion_div(logit_s, logit_t)
 
-        proj_cp = None
+        basis_cp = None
         if args.distill == 'kd': loss_kd = torch.tensor(0.0, device=inp.device)
         elif args.distill == 'hint':
             f_s = [module_list[1 + j](feat_s[j]) for j in range(len(feat_s))]
@@ -1105,22 +1124,18 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         elif args.distill in ['attention', 'WSL_att']: loss_kd = sum(criterion_kd(feat_s, feat_t))
         elif args.distill == 'vid': loss_kd = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s, feat_t, criterion_kd)])
         elif args.distill == 'pursuhint_bsat':
-            loss_kd, proj_cp = criterion_kd(
-                [f.float() for f in feat_s],
-                [f.float() for f in feat_t]
-            )
+            f_s = [module_list[1 + j](feat_s[j]).float() for j in range(len(feat_s))]
+            loss_kd, basis_cp = criterion_kd(f_s, [f.float() for f in feat_t])
             if dual:
                 feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t)
-                loss_kd_2, proj_tucker = criterion_kd_2(
-                    [f.float() for f in feat_s2],
-                    [f.float() for f in feat_t]
-                )
+                f_s2 = [module_list_2[1 + j](feat_s2[j]).float() for j in range(len(feat_s2))]
+                loss_kd_2, basis_tucker = criterion_kd_2(f_s2, [f.float() for f in feat_t])
                 cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
-                for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
-                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
-                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                for U_cp_i, U_tuck_i in zip(basis_cp, basis_tucker):
+                    loss_kd   = loss_kd   + cw * criterion_kd._cka_loss(U_cp_i, U_tuck_i.detach())
+                    loss_kd_2 = loss_kd_2 + cw * criterion_kd._cka_loss(U_tuck_i, U_cp_i.detach())
         else: raise NotImplementedError(args.distill)
 
         if loss_weighter is not None and args.distill != 'kd':

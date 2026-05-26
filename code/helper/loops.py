@@ -3,7 +3,6 @@ from __future__ import print_function, division
 import sys
 import time
 import torch
-import torch.nn.functional as F
 import numpy as np
 import math
 from .util import AverageMeter, accuracy
@@ -137,7 +136,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             if opt.distill in ['crd'] or opt.distill == 'WSL_crd'  or opt.distill == 'ATT_crd':
                 contrast_idx = contrast_idx.cuda()
 
-        proj_cp = None  # CP student's batch projectors, passed to Tucker for coupling
+        basis_cp = None  # CP student's SVD bases, passed to Tucker for CKA coupling
 
         # ===================forward CP student=====================
         preact = getattr(opt, 'preact', False)
@@ -209,25 +208,19 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             loss_group = [c(f_s, f_t) for f_s, f_t, c in zip(g_s, g_t, criterion_kd)]
             loss_kd = sum(loss_group)
         elif opt.distill == 'pursuhint_bsat':
-            f_s = feat_s
-            f_t = feat_t
-            loss_kd, proj_cp = criterion_kd(
-                [f.float() for f in f_s],
-                [f.float() for f in f_t]
-            )
+            f_s = [module_list[1 + j](feat_s[j]).float() for j in range(len(feat_s))]
+            loss_kd, basis_cp = criterion_kd(f_s, [f.float() for f in feat_t])
             if dual:
                 feat_s2, logit_s2 = model_s2(input, is_feat=True, preact=preact)
                 feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t)
-                loss_kd_2, proj_tucker = criterion_kd_2(
-                    [f.float() for f in feat_s2],
-                    [f.float() for f in feat_t]
-                )
+                f_s2 = [module_list_2[1 + j](feat_s2[j]).float() for j in range(len(feat_s2))]
+                loss_kd_2, basis_tucker = criterion_kd_2(f_s2, [f.float() for f in feat_t])
                 cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
-                for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
-                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
-                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                for U_cp_i, U_tuck_i in zip(basis_cp, basis_tucker):
+                    loss_kd   = loss_kd   + cw * criterion_kd._cka_loss(U_cp_i, U_tuck_i.detach())
+                    loss_kd_2 = loss_kd_2 + cw * criterion_kd._cka_loss(U_tuck_i, U_cp_i.detach())
         else:
             raise NotImplementedError(opt.distill)
 

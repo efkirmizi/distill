@@ -58,6 +58,10 @@ CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
 BSAT_RANK=8
 BSAT_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual BSAT
+AT_WEIGHT=1.0                     # spatial attention term weight in BSAT loss
+# For extreme compression ratios (>15x FLOPs), consider BSA_WEIGHT=0.05 to prevent
+# the CKA term from dominating when compressed student features are near-degenerate.
+BSA_WEIGHT=0.5                    # batch-subspace CKA term weight in BSAT loss
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
@@ -208,6 +212,8 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
         --bsat_rank ${BSAT_RANK} \
         --bsat_coupling_weight ${BSAT_COUPLING_WEIGHT} \
+        --at_weight ${AT_WEIGHT} \
+        --bsa_weight ${BSA_WEIGHT} \
         --epochs ${EPOCHS} \
         --learning_rate ${LR} \
         --weight_decay ${WEIGHT_DECAY} \
