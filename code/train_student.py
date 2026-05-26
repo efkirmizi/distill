@@ -299,6 +299,12 @@ def main():
             model_t = torch.compile(model_t, dynamic=True)
             if opt.dual_bsat:
                 model_s2 = torch.compile(model_s2, dynamic=True)
+            # Propagate compiled objects into module_lists so the training loop uses them
+            module_list[0] = model_s
+            module_list[-1] = model_t
+            if opt.dual_bsat:
+                module_list_2[0] = model_s2
+                module_list_2[-1] = model_t
     
     if opt.path_s:
         try:

@@ -21,9 +21,9 @@ class CoupledTensorLoss(nn.Module):
         Weighted by bsa_weight.
 
     Coupling term (dual-student mode):
-        When coupling_basis is supplied (CP student's SVD bases, detached),
-        the Tucker student is additionally pulled toward the CP student's
-        batch subspace via the same CKA loss. Weighted by coupling_weight.
+        Bidirectional CKA coupling between CP and Tucker student subspaces is
+        handled by the training loop (loops.py / train_stu_imagenet100.py) after
+        both forward passes complete. Weighted by coupling_weight.
     """
 
     def __init__(self, rank=8, at_weight=1.0, bsa_weight=0.5,
@@ -76,19 +76,17 @@ class CoupledTensorLoss(nn.Module):
         overlap = torch.mm(U_s.t(), U_t)          # q × q
         return 1.0 - (overlap ** 2).sum() / q
 
-    def forward(self, f_s, f_t, coupling_basis=None):
+    def forward(self, f_s, f_t):
         """
         Args:
-            f_s            : list of student feature tensors (channel-adapted
-                             via ConvReg), one per hint point
-            f_t            : list of teacher feature tensors, one per hint point
-            coupling_basis : list of B×q SVD-basis matrices from the CP student
-                             (detached). When provided, adds CKA coupling term.
+            f_s : list of student feature tensors (channel-adapted via ConvReg),
+                  one per hint point
+            f_t : list of teacher feature tensors, one per hint point
 
         Returns:
             loss  : scalar distillation loss
-            basis : list of B×q SVD bases for f_s, one per hint point.
-                    Pass these (detached) as coupling_basis to Tucker student.
+            basis : list of B×q left-singular-vector matrices, one per hint point.
+                    Pass these (detached) as coupling targets to the Tucker student.
         """
         device = f_s[0].device if f_s else torch.device('cpu')
         loss = torch.zeros(1, device=device).squeeze()
@@ -98,10 +96,7 @@ class CoupledTensorLoss(nn.Module):
             B = s.shape[0]
 
             # ── Part 1: Spatial Attention Matching ───────────────────────────
-            s_in = s
-            if s_in.shape[2:] != t.shape[2:]:
-                s_in = F.adaptive_avg_pool2d(s_in, t.shape[2:])
-            s_att = F.normalize(s_in.pow(2).mean(1).view(B, -1), dim=1)
+            s_att = F.normalize(s.pow(2).mean(1).view(B, -1), dim=1)
             t_att = F.normalize(t.pow(2).mean(1).view(B, -1), dim=1)
             loss = loss + self.at_weight * F.mse_loss(s_att, t_att)
 
@@ -110,10 +105,5 @@ class CoupledTensorLoss(nn.Module):
             U_s = self._svd_basis(s)              # grads flow to student
             loss = loss + self.bsa_weight * self._cka_loss(U_s, U_t)
             basis.append(U_s)
-
-        # ── Coupling term (Tucker ← CP, CP side detached) ────────────────────
-        if coupling_basis is not None:
-            for U_s, U_cp in zip(basis, coupling_basis):
-                loss = loss + self.coupling_weight * self._cka_loss(U_s, U_cp.detach())
 
         return loss, basis
