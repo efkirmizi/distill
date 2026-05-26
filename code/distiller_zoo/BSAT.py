@@ -39,7 +39,7 @@ class CoupledTensorLoss(nn.Module):
         """
         Rank-R orthonormal basis from a B×D attention map matrix via direct SVD.
 
-        att : B × D  (pre-computed spatial attention map, already 2-D)
+        att : B × D  (pre-computed, L2-normalised spatial attention map)
         returns : B × q  matrix U, the top-q left singular vectors.
         """
         M = att.float()                           # B × D, force fp32
@@ -51,7 +51,12 @@ class CoupledTensorLoss(nn.Module):
 
         # Disable autocast: svd requires fp32.
         with torch.amp.autocast('cuda', enabled=False):
-            U, _, _ = torch.linalg.svd(M, full_matrices=False)
+            try:
+                U, _, _ = torch.linalg.svd(M, full_matrices=False)
+            except torch._C._LinAlgError:
+                # Ill-conditioned matrix: add jitter and retry once
+                M = M + 1e-4 * torch.randn_like(M)
+                U, _, _ = torch.linalg.svd(M, full_matrices=False)
             U = U[:, :q]                          # B × q
 
         return U
@@ -89,15 +94,14 @@ class CoupledTensorLoss(nn.Module):
         for s, t in zip(f_s, f_t):
             B = s.shape[0]
 
-            # Shared attention maps: B × (H·W), channel-agnostic
-            s_att = s.pow(2).mean(1).view(B, -1)
-            t_att = t.pow(2).mean(1).view(B, -1)
+            # Shared L2-normalised attention maps: B × (H·W), channel-agnostic
+            s_att = F.normalize(s.pow(2).mean(1).view(B, -1), dim=1)
+            t_att = F.normalize(t.pow(2).mean(1).view(B, -1), dim=1)
 
             # ── Part 1: Spatial Attention Matching ───────────────────────────
-            loss = loss + self.at_weight * F.mse_loss(
-                F.normalize(s_att, dim=1), F.normalize(t_att, dim=1))
+            loss = loss + self.at_weight * F.mse_loss(s_att, t_att)
 
-            # ── Part 2: Batch-Subspace CKA (in attention space) ──────────────
+            # ── Part 2: Batch-Subspace CKA (in normalised attention space) ───
             U_t = self._svd_basis(t_att.detach())  # no grad through teacher
             U_s = self._svd_basis(s_att)            # grads flow to student
             loss = loss + self.bsa_weight * self._cka_loss(U_s, U_t)
