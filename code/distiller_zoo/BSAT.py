@@ -12,13 +12,14 @@ class CoupledTensorLoss(nn.Module):
         at each hint point. Sign of activations squared → channel-mean →
         L2-normalised → MSE. Weighted by at_weight.
 
-    Part 2 — Batch-Subspace CKA:
-        Batch-unfolds each feature map into a B×(C·H·W) matrix M, computes
-        orthonormal left singular vectors U via torch.linalg.svd (direct SVD
-        on M instead of eigendecomposing G=MMᵀ, halving the condition number),
-        then minimises the subspace CKA loss: 1 − ‖U_s^T U_t‖_F² / rank.
-        Bounded in [0,1]; scale-invariant; no LAPACK convergence issues.
-        Weighted by bsa_weight.
+    Part 2 — Batch-Subspace CKA (on attention maps):
+        Computes spatial attention maps A = (x²).mean(C) → B×(H·W), then
+        takes orthonormal left singular vectors U of A via torch.linalg.svd,
+        and minimises: 1 − ‖U_s^T U_t‖_F² / rank.
+        Operating in attention space (B×H·W) instead of raw feature space
+        (B×C·H·W) makes BSA channel-count-agnostic: the matrix is always
+        well-conditioned even under extreme compression where C is tiny.
+        Bounded in [0,1]; scale-invariant. Weighted by bsa_weight.
 
     Coupling term (dual-student mode):
         Bidirectional CKA coupling between CP and Tucker student subspaces is
@@ -34,22 +35,15 @@ class CoupledTensorLoss(nn.Module):
         self.bsa_weight = bsa_weight
         self.coupling_weight = coupling_weight
 
-    def _svd_basis(self, feat):
+    def _svd_basis(self, att):
         """
-        Rank-R orthonormal basis from a feature map via direct SVD.
+        Rank-R orthonormal basis from a B×D attention map matrix via direct SVD.
 
-        feat : B × C × H × W  (any shape with batch first)
-        returns : B × q  matrix U, the top-q left singular vectors of the
-                  batch-unfolded matrix B×D.
-
-        Uses torch.linalg.svd directly on M rather than eigendecomposing
-        G = M Mᵀ. This halves the effective condition number (κ(M) vs
-        κ(M)²) and avoids eigenvector instability when two singular values
-        are nearly equal late in training.
+        att : B × D  (pre-computed spatial attention map, already 2-D)
+        returns : B × q  matrix U, the top-q left singular vectors.
         """
-        B = feat.shape[0]
-        M = feat.reshape(B, -1).float()           # B × D, force fp32
-        q = min(self.rank, B, M.shape[1])
+        M = att.float()                           # B × D, force fp32
+        q = min(self.rank, M.shape[0], M.shape[1])
 
         norm = M.norm()
         if norm > 0:
@@ -95,14 +89,17 @@ class CoupledTensorLoss(nn.Module):
         for s, t in zip(f_s, f_t):
             B = s.shape[0]
 
-            # ── Part 1: Spatial Attention Matching ───────────────────────────
-            s_att = F.normalize(s.pow(2).mean(1).view(B, -1), dim=1)
-            t_att = F.normalize(t.pow(2).mean(1).view(B, -1), dim=1)
-            loss = loss + self.at_weight * F.mse_loss(s_att, t_att)
+            # Shared attention maps: B × (H·W), channel-agnostic
+            s_att = s.pow(2).mean(1).view(B, -1)
+            t_att = t.pow(2).mean(1).view(B, -1)
 
-            # ── Part 2: Batch-Subspace CKA ────────────────────────────────────
-            U_t = self._svd_basis(t.detach())     # no grad through teacher
-            U_s = self._svd_basis(s)              # grads flow to student
+            # ── Part 1: Spatial Attention Matching ───────────────────────────
+            loss = loss + self.at_weight * F.mse_loss(
+                F.normalize(s_att, dim=1), F.normalize(t_att, dim=1))
+
+            # ── Part 2: Batch-Subspace CKA (in attention space) ──────────────
+            U_t = self._svd_basis(t_att.detach())  # no grad through teacher
+            U_s = self._svd_basis(s_att)            # grads flow to student
             loss = loss + self.bsa_weight * self._cka_loss(U_s, U_t)
             basis.append(U_s)
 
