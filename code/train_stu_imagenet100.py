@@ -140,11 +140,20 @@ def parse():
                         help='weight for the Tucker←CP coupling term in dual BSAT mode')
     parser.add_argument('--bsat_align_mode', type=str, default='projector',
                         choices=['projector', 'gram'],
-                        help="BSA alignment: 'projector' (eigh rank-R projector, original) "
-                             "or 'gram' (eigh-free cosine Gram / Similarity-Preserving)")
+                        help="BSA alignment: 'projector' (adaptive soft-spectral projector, default) "
+                             "or 'gram' (eigh-free cosine similarity / Similarity-Preserving, ablation)")
+    parser.add_argument('--bsat_decomp', type=str, default='eigh', choices=['eigh', 'svd'],
+                        help="projector-mode subspace backend: 'eigh' of MMᵀ (cheap, default) or "
+                             "'svd' of M (better-conditioned near the energy boundary, heavier)")
+    parser.add_argument('--bsat_energy', type=float, default=0.9,
+                        help='energy fraction setting the adaptive effective rank in projector mode '
+                             '(1.0 disables adaptivity → use the full cap R)')
+    parser.add_argument('--bsat_soft_temp', type=float, default=0.25,
+                        help='softmax temperature for the soft spectral weights '
+                             '(smaller = sharper, closer to a hard top-q projector)')
     parser.add_argument('--bsat_proj_stable', action='store_true',
-                        help='stabilize the projector path: float64 eigh, relative jitter, '
-                             'NaN-safe fallback, MSE/q normalization (projector mode only)')
+                        help='stabilize the projector path: float64 decomposition, relative jitter, '
+                             'NaN-safe zero-gradient fallback (projector mode only)')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -542,11 +551,17 @@ def main():
             criterion_kd = CoupledTensorLoss(rank=args.bsat_rank,
                                              coupling_weight=args.bsat_coupling_weight,
                                              align_mode=args.bsat_align_mode,
+                                             decomp=args.bsat_decomp,
+                                             energy=args.bsat_energy,
+                                             soft_temp=args.bsat_soft_temp,
                                              proj_stable=args.bsat_proj_stable)
             if args.dual_bsat:
                 criterion_kd_2 = CoupledTensorLoss(rank=args.bsat_rank,
                                                    coupling_weight=args.bsat_coupling_weight,
                                                    align_mode=args.bsat_align_mode,
+                                                   decomp=args.bsat_decomp,
+                                                   energy=args.bsat_energy,
+                                                   soft_temp=args.bsat_soft_temp,
                                                    proj_stable=args.bsat_proj_stable)
 
         else:

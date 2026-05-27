@@ -5,98 +5,140 @@ import torch.nn.functional as F
 
 class CoupledTensorLoss(nn.Module):
     """
-    BSAT distillation loss with two parts.
+    BSAT distillation loss (merged): adaptive soft-spectral batch-subspace
+    alignment, with a Similarity-Preserving 'gram' fallback.
 
-    Part 1 — Spatial Attention Matching (AT loss):
-        Per-sample spatial attention maps: square activations → channel-mean →
-        L2-normalise → MSE. Stable and batch-size-independent.
+    Part 1 — Spatial Attention Matching (AT):
+        Per-sample squared-activation attention maps → channel-mean →
+        L2-normalise → MSE. Stable and batch-size independent.
 
     Part 2 — Batch-Subspace Alignment (BSA), selected by ``align_mode``:
-        * 'projector' (default): batch-unfold each feature map into B×(C·H·W),
-          form the Gram matrix G = M Mᵀ (B×B), and align the rank-R orthogonal
-          projector P = U Uᵀ obtained from torch.linalg.eigh(G). Sign-invariant.
-        * 'gram': skip the eigendecomposition entirely and align the cosine Gram
-          (similarity) matrix Ĝ = M̂ M̂ᵀ ∈ [−1,1]^{B×B} of the row-normalised
-          batch matrix. Full-rank, eigengap-free, sign-invariant (this is the
-          Similarity-Preserving formulation). Avoids the 1/(λ_q − λ_{q+1})
-          gradient blow-up that destabilises the projector path on the small,
-          noisy batches produced by CIFAR-scale extreme compression.
+      * 'projector' (default): adaptive SOFT spectral projector. Batch-unfold
+        each feature map to M (B×D), take the left singular subspace of M
+        (eigenvectors of G = M Mᵀ), and build P = U diag(w) Uᵀ where
+          - the effective rank q is set by an ENERGY threshold (smallest q whose
+            top eigenvalues capture ``energy`` of trace(G)), capped by ``rank``.
+            This decouples the constraint stiffness from batch size — the cause
+            of the CIFAR small-batch collapse — so ``rank`` is only a hard cap.
+          - w is a smooth softmax over the retained eigenvalues (temperature
+            ``soft_temp``); there is no hard 0/1 cutoff, so eigenvalue crossings
+            no longer spike the gradient.
+        P is exactly sign-invariant ((-u)(-u)ᵀ = u uᵀ) and continuous in feat.
+        With energy=1.0 and soft_temp→0 this recovers the original hard-rank-R
+        projector, so the v1 behaviour is a strict special case.
+      * 'gram': eigh-free cosine similarity matrix Ĝ = M̂ M̂ᵀ ∈ [-1,1]^{B×B}
+        (Similarity-Preserving). Kept for ablation; it over-constrains tiny
+        students on the hardest configs, so it is not the default.
 
-    ``proj_stable`` (projector mode only): run the Gram + eigh in float64, use a
-        relative diagonal jitter, normalise the BSA MSE by the subspace rank q,
-        and fall back to a zero-gradient projector if eigh returns non-finite
-        values — so one ill-conditioned batch cannot poison the optimiser step.
+    ``decomp`` ('eigh' | 'svd'): how the left singular subspace is obtained in
+        projector mode. 'eigh' forms G = M Mᵀ (B×B) and eigendecomposes it
+        (cheap, default). 'svd' decomposes M directly, avoiding the squared
+        condition number that forming G incurs — better-conditioned directions
+        near the energy boundary — at higher compute/memory (works on B×D).
+        The soft weighting removes the *gradient* discontinuity either way, so
+        SVD mainly sharpens the forward subspace estimate.
 
-    Coupling term (dual-student mode):
-        When ``coupling_proj`` is supplied, this student's B×B matrix is pulled
-        toward the peer's (detached) by coupling_weight·MSE. Works on whichever
-        B×B matrix the active mode produces (projector or Gram). NOTE: the
-        current training loops apply coupling themselves (so they can warm it up
-        and route it through the dynamic weighter); this in-forward path is kept
-        for backward compatibility.
+    ``proj_stable``: run the decomposition in float64 with a relative diagonal
+        jitter and a NaN-safe fallback (zero-gradient projector), so a single
+        ill-conditioned batch cannot poison the optimiser step.
+
+    Coupling (dual-student): when ``coupling_proj`` is supplied, this student's
+        B×B matrix is pulled toward the peer's (detached) by coupling_weight·MSE.
+        Dimension-agnostic (always B×B). NOTE: the training loops apply coupling
+        and BSA warmup themselves (so they can route AT/BSA through the dynamic
+        weighter); this in-forward path is kept for backward compatibility.
+
+    Returns ``(loss, proj, {'at', 'bsa'})`` so the loop can weight AT and BSA
+    independently and warm up / scale the subspace term.
     """
 
     def __init__(self, rank=8, coupling_weight=1.0, align_mode='projector',
-                 proj_stable=False, **kwargs):
+                 decomp='eigh', energy=0.9, soft_temp=0.25, proj_stable=False,
+                 **kwargs):
         super(CoupledTensorLoss, self).__init__()
         self.rank = rank
         self.coupling_weight = coupling_weight
         self.align_mode = align_mode
+        self.decomp = decomp
+        self.energy = energy
+        self.soft_temp = soft_temp
         self.proj_stable = proj_stable
 
     def _gram(self, feat):
-        """Cosine Gram (similarity) matrix Ĝ = M̂ M̂ᵀ ∈ [-1,1]^{B×B}; no eigh."""
+        """Cosine Gram (similarity) matrix Ĝ = M̂ M̂ᵀ ∈ [-1,1]^{B×B}; no eigh/svd."""
         B = feat.shape[0]
         M = feat.reshape(B, -1).float()
         M = F.normalize(M, dim=1, eps=1e-6)      # unit-norm rows; eps guards dead features
         return M @ M.t()                         # B × B, smooth gradient everywhere
 
-    def _projection(self, feat):
+    def _spectrum(self, M):
         """
-        Rank-R batch-mode orthogonal projector P = U Uᵀ (B×B) from a feature map.
+        Ascending eigenvalues of G = M Mᵀ and the matching left singular vectors,
+        via eigh(M Mᵀ) or svd(M). M is expected pre-scaled. Returns (evals, evecs).
+        """
+        B = M.shape[0]
+        if self.decomp == 'svd':
+            # Left singular vectors of M == eigenvectors of G; SVD avoids forming
+            # G (which squares the condition number). torch.linalg.svd sorts
+            # descending, so flip to match eigh's ascending convention.
+            U, S, _ = torch.linalg.svd(M, full_matrices=False)
+            evecs = torch.flip(U, dims=[1])
+            evals = torch.flip(S, dims=[0]).pow(2)        # eigenvalues of G = σ²
+            return evals, evecs
+        G = M @ M.t()
+        if self.proj_stable:
+            # Relative jitter scales with the matrix; robust on degenerate spectra.
+            jitter = torch.clamp(1e-4 * G.diagonal().mean(), min=1e-6)
+        else:
+            jitter = G.new_tensor(1e-6)
+        G = G + jitter * torch.eye(B, device=G.device, dtype=G.dtype)
+        evals, evecs = torch.linalg.eigh(G)               # ascending
+        return evals, evecs
 
-        The eigenvectors of the Gram matrix G = M Mᵀ are the left singular vectors
-        of the batch-unfolded matrix M (B×D); we eigendecompose G with the
-        symmetric solver, which is far more stable than an SVD path on
-        near-constant early-training features.
-        """
+    def _projection(self, feat):
+        """Adaptive soft batch-mode projector P = U diag(w) Uᵀ (B×B)."""
         B = feat.shape[0]
         M = feat.reshape(B, -1).float()          # B × D, force fp32
-        q = min(self.rank, B, M.shape[1])
+        D = M.shape[1]
 
         # Frobenius-normalise: scaling M by a constant leaves U unchanged but
-        # keeps the Gram matrix well-scaled.
+        # keeps the Gram matrix well-scaled (trace(G) = 1).
         norm = M.norm()
         if norm > 0:
             M = M / norm
 
-        if self.proj_stable:
-            # float64 eigh + relative jitter + NaN-safe fallback.
-            with torch.amp.autocast('cuda', enabled=False):
-                Md = M.double()
-                G = Md @ Md.t()
-                jitter = torch.clamp(1e-4 * G.diagonal().mean(), min=1e-6)
-                G = G + jitter * torch.eye(B, device=G.device, dtype=G.dtype)
-                try:
-                    U = torch.linalg.eigh(G).eigenvectors[:, -q:]
-                    ok = bool(torch.isfinite(U).all())
-                except Exception:
-                    ok = False
-                if not ok:
-                    # zero-gradient projector: this hint contributes no signal
-                    # this batch, instead of NaNs that skip the whole update.
-                    return torch.zeros(B, B, device=feat.device, dtype=feat.dtype)
-            return (U @ U.t()).to(feat.dtype)
-
-        # Default path — unchanged numerics (preserves the ImageNet baseline).
+        dtype = torch.float64 if self.proj_stable else torch.float32
         with torch.amp.autocast('cuda', enabled=False):
-            G = M @ M.t()                            # B × B, symmetric PSD
-            # Diagonal jitter: prevents eigh from failing on ill-conditioned G
-            # (near-duplicate eigenvalues cause LAPACK error 257 late in training).
-            G = G + 1e-6 * torch.eye(B, device=G.device, dtype=G.dtype)
-            # eigh returns eigenvalues in ascending order; take the last q columns.
-            U = torch.linalg.eigh(G).eigenvectors[:, -q:]   # B × q
-        return U @ U.t()                             # B × B
+            Mc = M.to(dtype)
+            try:
+                evals, evecs = self._spectrum(Mc)
+                ok = bool(torch.isfinite(evals).all()) and bool(torch.isfinite(evecs).all())
+            except Exception:
+                ok = False
+            if not ok:
+                # NaN-safe: this hint contributes no signal this batch, instead
+                # of propagating NaNs that would skip the whole optimiser step.
+                return torch.zeros(B, B, device=feat.device, dtype=feat.dtype)
+
+            ev = evals.clamp(min=0.0)
+            total = ev.sum()
+            if total <= 0:
+                # degenerate (near-constant features): zero-gradient projector.
+                return torch.zeros(B, B, device=feat.device, dtype=feat.dtype)
+
+            # ── Batch-adaptive effective rank via energy threshold ──
+            cum = torch.cumsum(torch.flip(ev, dims=[0]), dim=0) / total   # descending energy
+            q_energy = int(torch.searchsorted(cum, cum.new_tensor(self.energy)).item()) + 1
+            q = max(1, min(q_energy, self.rank, B, D))
+
+            top_evals = ev[-q:]                  # ascending
+            top_evecs = evecs[:, -q:]            # B × q
+
+            # ── Soft spectral weights: smooth, sum to q (matches a rank-q trace) ──
+            logits = top_evals / (top_evals.max() * self.soft_temp + 1e-12)
+            w = F.softmax(logits, dim=0) * q
+            P = (top_evecs * w.unsqueeze(0)) @ top_evecs.t()
+        return P.to(feat.dtype)
 
     def forward(self, f_s, f_t, coupling_proj=None):
         """
@@ -108,7 +150,7 @@ class CoupledTensorLoss(nn.Module):
 
         Returns:
             loss  : scalar distillation loss (AT + BSA [+ coupling])
-            proj  : list of B×B matrices for f_s, one per hint point (rank-R
+            proj  : list of B×B matrices for f_s, one per hint point (soft
                     projector in 'projector' mode, cosine Gram in 'gram' mode).
                     Pass these (detached) as coupling_proj to the peer student.
             parts : dict {'at': L_AT, 'bsa': L_BSA} for separate dynamic weighting.
@@ -138,11 +180,7 @@ class CoupledTensorLoss(nn.Module):
             else:
                 P_t = self._projection(t.detach())
                 P_s = self._projection(s)
-                bsa_k = F.mse_loss(P_s, P_t)
-                if self.proj_stable:
-                    q = min(self.rank, B, s.reshape(B, -1).shape[1])
-                    bsa_k = bsa_k / max(q, 1)    # scale-comparable across batch sizes
-                loss_bsa = loss_bsa + bsa_k
+                loss_bsa = loss_bsa + F.mse_loss(P_s, P_t)
                 proj.append(P_s)
 
         loss = loss_at + loss_bsa
