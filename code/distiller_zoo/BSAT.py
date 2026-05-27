@@ -12,13 +12,14 @@ class CoupledTensorLoss(nn.Module):
         at each hint point. Sign of activations squared → channel-mean →
         L2-normalised → MSE. Weighted by at_weight.
 
-    Part 2 — Batch-Subspace CKA (on attention maps):
-        Computes spatial attention maps A = (x²).mean(C) → B×(H·W), then
-        takes orthonormal left singular vectors U of A via torch.linalg.svd,
-        and minimises: 1 − ‖U_s^T U_t‖_F² / rank.
-        Operating in attention space (B×H·W) instead of raw feature space
-        (B×C·H·W) makes BSA channel-count-agnostic: the matrix is always
-        well-conditioned even under extreme compression where C is tiny.
+    Part 2 — Batch-Subspace CKA (on raw features):
+        Batch-unfolds each feature map into a B×(C·H·W) matrix M, computes
+        orthonormal left singular vectors U via torch.linalg.svd, then
+        minimises: 1 − ‖U_s^T U_t‖_F² / rank.
+        Operates on the full feature tensor (not attention maps) so it captures
+        both channel and spatial structure — complementary to the AT term.
+        If SVD fails (ill-conditioned batch), returns detached zeros so BSA
+        contributes a constant with zero gradient — skipping that batch cleanly.
         Bounded in [0,1]; scale-invariant. Weighted by bsa_weight.
 
     Coupling term (dual-student mode):
@@ -35,14 +36,16 @@ class CoupledTensorLoss(nn.Module):
         self.bsa_weight = bsa_weight
         self.coupling_weight = coupling_weight
 
-    def _svd_basis(self, att):
+    def _svd_basis(self, feat):
         """
-        Rank-R orthonormal basis from a B×D attention map matrix via direct SVD.
+        Rank-R orthonormal basis from a feature map via direct SVD.
 
-        att : B × D  (pre-computed, L2-normalised spatial attention map)
-        returns : B × q  matrix U, the top-q left singular vectors.
+        feat : B × C × H × W  (any shape with batch first)
+        returns : B × q  matrix U, the top-q left singular vectors of the
+                  batch-unfolded matrix B×D.
         """
-        M = att.float()                           # B × D, force fp32
+        B = feat.shape[0]
+        M = feat.reshape(B, -1).float()           # B × D, force fp32
         q = min(self.rank, M.shape[0], M.shape[1])
 
         norm = M.norm()
@@ -54,9 +57,9 @@ class CoupledTensorLoss(nn.Module):
             try:
                 U, _, _ = torch.linalg.svd(M, full_matrices=False)
             except torch._C._LinAlgError:
-                # Ill-conditioned matrix: add jitter and retry once
-                M = M + 1e-4 * torch.randn_like(M)
-                U, _, _ = torch.linalg.svd(M, full_matrices=False)
+                # Ill-conditioned matrix: return detached zeros so CKA evaluates
+                # to a constant (1.0) with zero gradient — skip BSA for this batch.
+                return torch.zeros(B, q, device=feat.device, dtype=torch.float32)
             U = U[:, :q]                          # B × q
 
         return U
@@ -94,16 +97,14 @@ class CoupledTensorLoss(nn.Module):
         for s, t in zip(f_s, f_t):
             B = s.shape[0]
 
-            # Shared L2-normalised attention maps: B × (H·W), channel-agnostic
+            # ── Part 1: Spatial Attention Matching ───────────────────────────
             s_att = F.normalize(s.pow(2).mean(1).view(B, -1), dim=1)
             t_att = F.normalize(t.pow(2).mean(1).view(B, -1), dim=1)
-
-            # ── Part 1: Spatial Attention Matching ───────────────────────────
             loss = loss + self.at_weight * F.mse_loss(s_att, t_att)
 
-            # ── Part 2: Batch-Subspace CKA (in normalised attention space) ───
-            U_t = self._svd_basis(t_att.detach())  # no grad through teacher
-            U_s = self._svd_basis(s_att)            # grads flow to student
+            # ── Part 2: Batch-Subspace CKA (raw features, complementary to AT)
+            U_t = self._svd_basis(t.detach())      # no grad through teacher
+            U_s = self._svd_basis(s)               # grads flow to student
             loss = loss + self.bsa_weight * self._cka_loss(U_s, U_t)
             basis.append(U_s)
 
