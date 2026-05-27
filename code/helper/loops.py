@@ -211,28 +211,43 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         elif opt.distill == 'pursuhint_bsat':
             f_s = feat_s
             f_t = feat_t
-            loss_kd, proj_cp = criterion_kd(
+            loss_kd, proj_cp, parts_cp = criterion_kd(
                 [f.float() for f in f_s],
                 [f.float() for f in f_t]
             )
+            # Linear warmup for the BSA + coupling contribution (0 = off): the
+            # batch-subspace signal is garbage while features are near-constant.
+            warmup = getattr(opt, 'bsat_subspace_warmup', 0)
+            ss = 1.0 if warmup <= 0 else min(1.0, epoch / float(warmup))
+            coup_cp = torch.zeros((), device=input.device)
             if dual:
                 feat_s2, logit_s2 = model_s2(input, is_feat=True, preact=preact)
                 feat_s2 = [feat_s2[int(i)] for i in opt.s_points.split(',')]
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t)
-                loss_kd_2, proj_tucker = criterion_kd_2(
+                loss_kd_2, proj_tucker, parts_tuck = criterion_kd_2(
                     [f.float() for f in feat_s2],
                     [f.float() for f in feat_t]
                 )
                 cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
+                coup_tk = torch.zeros((), device=input.device)
                 for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
-                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
-                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                    coup_cp = coup_cp + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
+                    coup_tk = coup_tk + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                at_tk = parts_tuck['at']
+                bsa_tk = ss * (parts_tuck['bsa'] + coup_tk)
+                loss_kd_2 = at_tk + bsa_tk
+            at_cp = parts_cp['at']
+            bsa_cp = ss * (parts_cp['bsa'] + coup_cp)
+            loss_kd = at_cp + bsa_cp
         else:
             raise NotImplementedError(opt.distill)
 
         if loss_weighter is not None and opt.distill != 'kd':
-            loss = loss_weighter(loss_cls, loss_div, loss_kd)
+            if opt.distill == 'pursuhint_bsat' and getattr(opt, 'bsat_split_losses', False):
+                loss = loss_weighter(loss_cls, loss_div, at_cp, bsa_cp)
+            else:
+                loss = loss_weighter(loss_cls, loss_div, loss_kd)
         else:
             loss = opt.gamma * loss_cls + opt.alpha * loss_div + opt.beta * loss_kd
 
@@ -280,9 +295,12 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                     loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
             else:
                 # pursuhint_bsat: Tucker forward + bidirectional coupling already done inside the
-                # CP block above; loss_cls_2, loss_div_2, loss_kd_2 are already set.
+                # CP block above; loss_cls_2, loss_div_2, loss_kd_2 (and at_tk/bsa_tk) are set.
                 if loss_weighter_2 is not None:
-                    loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
+                    if getattr(opt, 'bsat_split_losses', False):
+                        loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, at_tk, bsa_tk)
+                    else:
+                        loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
                 else:
                     loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
 

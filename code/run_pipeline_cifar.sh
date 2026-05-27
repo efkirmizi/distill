@@ -59,6 +59,16 @@ TUCKER_RANK_RATIO=0.25
 BSAT_RANK=8
 BSAT_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual BSAT
 
+# BSAT CIFAR-stability knobs (defaults reproduce the original paper behavior)
+BSAT_ALIGN_MODE="projector"       # 'projector' (original, eigh) or 'gram' (eigh-free, recommended for CIFAR)
+BSAT_PROJ_STABLE=0                # 1 = float64 eigh + relative jitter + NaN-safe (projector mode only)
+BSAT_SPLIT_LOSSES=0               # 1 = give the BSA term its own dynamic loss weight
+BSAT_SUBSPACE_WARMUP=0            # epochs to linearly ramp BSA + coupling from 0 (0 = off)
+
+BSAT_EXTRA_FLAGS="--bsat_align_mode ${BSAT_ALIGN_MODE} --bsat_subspace_warmup ${BSAT_SUBSPACE_WARMUP}"
+if [ "$BSAT_PROJ_STABLE" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_proj_stable"; fi
+if [ "$BSAT_SPLIT_LOSSES" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_split_losses"; fi
+
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
 if [ "$USE_VBMF" -eq 1 ]; then
@@ -216,6 +226,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --num_workers ${NUM_WORKERS} \
         --hint_points "${HINT_POINTS}" \
         -r ${GAMMA} -a ${ALPHA} -b ${BETA} \
+        ${BSAT_EXTRA_FLAGS} \
         ${VBMF_FLAG} ${TORCH_COMPILE} ${DYNAMIC_LOSS_WEIGHTS} ${NO_TEACHER_CACHE_FLAG} >> "${LOG}" 2>&1 || { echo "ERROR: Student training failed. Check ${LOG}."; exit 1; }
 
     echo "Student training complete." >> "${LOG}"

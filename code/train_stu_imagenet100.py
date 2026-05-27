@@ -138,6 +138,13 @@ def parse():
                         help='SVD rank R for batch-subspace alignment in BSAT loss')
     parser.add_argument('--bsat_coupling_weight', type=float, default=1.0,
                         help='weight for the Tucker←CP coupling term in dual BSAT mode')
+    parser.add_argument('--bsat_align_mode', type=str, default='projector',
+                        choices=['projector', 'gram'],
+                        help="BSA alignment: 'projector' (eigh rank-R projector, original) "
+                             "or 'gram' (eigh-free cosine Gram / Similarity-Preserving)")
+    parser.add_argument('--bsat_proj_stable', action='store_true',
+                        help='stabilize the projector path: float64 eigh, relative jitter, '
+                             'NaN-safe fallback, MSE/q normalization (projector mode only)')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -533,10 +540,14 @@ def main():
 
         elif args.distill == 'pursuhint_bsat':
             criterion_kd = CoupledTensorLoss(rank=args.bsat_rank,
-                                             coupling_weight=args.bsat_coupling_weight)
+                                             coupling_weight=args.bsat_coupling_weight,
+                                             align_mode=args.bsat_align_mode,
+                                             proj_stable=args.bsat_proj_stable)
             if args.dual_bsat:
                 criterion_kd_2 = CoupledTensorLoss(rank=args.bsat_rank,
-                                                   coupling_weight=args.bsat_coupling_weight)
+                                                   coupling_weight=args.bsat_coupling_weight,
+                                                   align_mode=args.bsat_align_mode,
+                                                   proj_stable=args.bsat_proj_stable)
 
         else:
             raise NotImplementedError(args.distill)
@@ -1105,7 +1116,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         elif args.distill in ['attention', 'WSL_att']: loss_kd = sum(criterion_kd(feat_s, feat_t))
         elif args.distill == 'vid': loss_kd = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s, feat_t, criterion_kd)])
         elif args.distill == 'pursuhint_bsat':
-            loss_kd, proj_cp = criterion_kd(
+            loss_kd, proj_cp, _ = criterion_kd(
                 [f.float() for f in feat_s],
                 [f.float() for f in feat_t]
             )
@@ -1113,7 +1124,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                 feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t)
-                loss_kd_2, proj_tucker = criterion_kd_2(
+                loss_kd_2, proj_tucker, _ = criterion_kd_2(
                     [f.float() for f in feat_s2],
                     [f.float() for f in feat_t]
                 )
