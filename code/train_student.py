@@ -100,6 +100,19 @@ def parse_option():
                         help='SVD rank R for batch-subspace alignment in BSAT loss')
     parser.add_argument('--bsat_coupling_weight', type=float, default=1.0,
                         help='weight for the Tucker←CP coupling term in dual BSAT mode')
+    parser.add_argument('--bsat_align_mode', type=str, default='projector',
+                        choices=['projector', 'gram'],
+                        help="BSA alignment: 'projector' (eigh rank-R projector, original) "
+                             "or 'gram' (eigh-free cosine Gram / Similarity-Preserving)")
+    parser.add_argument('--bsat_proj_stable', action='store_true',
+                        help='stabilize the projector path: float64 eigh, relative jitter, '
+                             'NaN-safe fallback, MSE/q normalization (projector mode only)')
+    parser.add_argument('--bsat_split_losses', action='store_true',
+                        help='give the BSA term its own dynamic loss weight '
+                             '(AT and BSA become separate tasks for the uncertainty weighter)')
+    parser.add_argument('--bsat_subspace_warmup', type=int, default=0,
+                        help='linearly ramp the BSA + coupling contribution from 0 to 1 '
+                             'over the first N epochs (0 = off)')
 
     parser.add_argument('-r', '--gamma', type=float, default=1, help='weight for classification')
     parser.add_argument('-a', '--alpha', type=float, default=None, help='weight balance for KD')
@@ -450,10 +463,14 @@ def main():
         trainable_list.append(criterion_kd)
     elif opt.distill == 'pursuhint_bsat':
         criterion_kd = CoupledTensorLoss(rank=opt.bsat_rank,
-                                         coupling_weight=opt.bsat_coupling_weight)
+                                         coupling_weight=opt.bsat_coupling_weight,
+                                         align_mode=opt.bsat_align_mode,
+                                         proj_stable=opt.bsat_proj_stable)
         if opt.dual_bsat:
             criterion_kd_2 = CoupledTensorLoss(rank=opt.bsat_rank,
-                                               coupling_weight=opt.bsat_coupling_weight)
+                                               coupling_weight=opt.bsat_coupling_weight,
+                                               align_mode=opt.bsat_align_mode,
+                                               proj_stable=opt.bsat_proj_stable)
     else:
         raise NotImplementedError(opt.distill)
 
@@ -498,9 +515,10 @@ def main():
     if opt.dynamic_loss_weights:
         if opt.gamma != 1.0 or opt.alpha != 1.0 or opt.beta != 1.0:
             print(f"WARNING: --dynamic_loss_weights is ON; --gamma/--alpha/--beta ({opt.gamma}/{opt.alpha}/{opt.beta}) are ignored.")
-        loss_weighter = DynamicLossWeighter(num_losses=3)
+        n_losses = 4 if (opt.distill == 'pursuhint_bsat' and opt.bsat_split_losses) else 3
+        loss_weighter = DynamicLossWeighter(num_losses=n_losses)
         if opt.dual_bsat:
-            loss_weighter_2 = DynamicLossWeighter(num_losses=3)
+            loss_weighter_2 = DynamicLossWeighter(num_losses=n_losses)
 
     # optimizer
     if opt.dynamic_loss_weights:
