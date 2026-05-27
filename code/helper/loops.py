@@ -224,10 +224,11 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                     [f.float() for f in feat_s2],
                     [f.float() for f in feat_t]
                 )
-                cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
+                cw = getattr(criterion_kd, 'coupling_weight', 1.0)
+                bsa_scale = criterion_kd._bsa_scale()
                 for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
-                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
-                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                    loss_kd   = loss_kd   + bsa_scale * cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
+                    loss_kd_2 = loss_kd_2 + bsa_scale * cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
         else:
             raise NotImplementedError(opt.distill)
 

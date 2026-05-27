@@ -135,9 +135,15 @@ def parse():
     parser.add_argument('--use_vbmf', action='store_true',
                         help='auto-select decomposition rank per layer via EVBMF instead of global ratio')
     parser.add_argument('--bsat_rank', type=int, default=8,
-                        help='SVD rank R for batch-subspace alignment in BSAT loss')
+                        help='hard cap on subspace directions in BSAT (energy threshold usually selects fewer)')
     parser.add_argument('--bsat_coupling_weight', type=float, default=1.0,
                         help='weight for the Tucker←CP coupling term in dual BSAT mode')
+    parser.add_argument('--bsat_energy', type=float, default=0.9,
+                        help='fraction of Gram-matrix trace the retained directions must capture (0<e≤1)')
+    parser.add_argument('--bsat_soft_temp', type=float, default=0.25,
+                        help='softmax temperature for spectral weighting in BSAT projector')
+    parser.add_argument('--bsat_warmup_steps', type=int, default=0,
+                        help='linearly ramp BSA+coupling from 0 to full weight over this many forward calls')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -533,10 +539,16 @@ def main():
 
         elif args.distill == 'pursuhint_bsat':
             criterion_kd = CoupledTensorLoss(rank=args.bsat_rank,
-                                             coupling_weight=args.bsat_coupling_weight)
+                                             coupling_weight=args.bsat_coupling_weight,
+                                             energy=args.bsat_energy,
+                                             soft_temp=args.bsat_soft_temp,
+                                             bsa_warmup_steps=args.bsat_warmup_steps)
             if args.dual_bsat:
                 criterion_kd_2 = CoupledTensorLoss(rank=args.bsat_rank,
-                                                   coupling_weight=args.bsat_coupling_weight)
+                                                   coupling_weight=args.bsat_coupling_weight,
+                                                   energy=args.bsat_energy,
+                                                   soft_temp=args.bsat_soft_temp,
+                                                   bsa_warmup_steps=args.bsat_warmup_steps)
 
         else:
             raise NotImplementedError(args.distill)
@@ -1117,10 +1129,11 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                     [f.float() for f in feat_s2],
                     [f.float() for f in feat_t]
                 )
-                cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
+                cw = getattr(criterion_kd, 'coupling_weight', 1.0)
+                bsa_scale = criterion_kd._bsa_scale()
                 for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
-                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
-                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                    loss_kd   = loss_kd   + bsa_scale * cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
+                    loss_kd_2 = loss_kd_2 + bsa_scale * cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
         else: raise NotImplementedError(args.distill)
 
         if loss_weighter is not None and args.distill != 'kd':

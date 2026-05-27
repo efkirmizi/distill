@@ -59,6 +59,9 @@ set CP_RANK_RATIO=0.5
 set TUCKER_RANK_RATIO=0.25
 set BSAT_RANK=8
 set BSAT_COUPLING_WEIGHT=1.0
+set BSAT_ENERGY=0.9
+set BSAT_SOFT_TEMP=0.25
+set BSAT_WARMUP_STEPS=0
 
 REM ============================================================
 REM VBMF automatic rank selection (1=on, 0=off)
@@ -223,6 +226,9 @@ if %RUN_TRAINING% == 1 (
         --tucker_rank_ratio %TUCKER_RANK_RATIO% ^
         --bsat_rank %BSAT_RANK% ^
         --bsat_coupling_weight %BSAT_COUPLING_WEIGHT% ^
+        --bsat_energy %BSAT_ENERGY% ^
+        --bsat_soft_temp %BSAT_SOFT_TEMP% ^
+        --bsat_warmup_steps %BSAT_WARMUP_STEPS% ^
         --epochs %EPOCHS% ^
         --learning_rate %LEARNING_RATE% ^
         --weight_decay %WEIGHT_DECAY% ^

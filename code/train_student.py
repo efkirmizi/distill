@@ -97,9 +97,15 @@ def parse_option():
     parser.add_argument('--use_vbmf', action='store_true',
                         help='auto-select decomposition rank per layer via EVBMF instead of global ratio')
     parser.add_argument('--bsat_rank', type=int, default=8,
-                        help='SVD rank R for batch-subspace alignment in BSAT loss')
+                        help='hard cap on subspace directions in BSAT (energy threshold usually selects fewer)')
     parser.add_argument('--bsat_coupling_weight', type=float, default=1.0,
                         help='weight for the Tucker←CP coupling term in dual BSAT mode')
+    parser.add_argument('--bsat_energy', type=float, default=0.9,
+                        help='fraction of Gram-matrix trace the retained directions must capture (0<e≤1)')
+    parser.add_argument('--bsat_soft_temp', type=float, default=0.25,
+                        help='softmax temperature for spectral weighting in BSAT projector')
+    parser.add_argument('--bsat_warmup_steps', type=int, default=0,
+                        help='linearly ramp BSA+coupling from 0 to full weight over this many forward calls')
 
     parser.add_argument('-r', '--gamma', type=float, default=1, help='weight for classification')
     parser.add_argument('-a', '--alpha', type=float, default=None, help='weight balance for KD')
@@ -450,10 +456,16 @@ def main():
         trainable_list.append(criterion_kd)
     elif opt.distill == 'pursuhint_bsat':
         criterion_kd = CoupledTensorLoss(rank=opt.bsat_rank,
-                                         coupling_weight=opt.bsat_coupling_weight)
+                                         coupling_weight=opt.bsat_coupling_weight,
+                                         energy=opt.bsat_energy,
+                                         soft_temp=opt.bsat_soft_temp,
+                                         bsa_warmup_steps=opt.bsat_warmup_steps)
         if opt.dual_bsat:
             criterion_kd_2 = CoupledTensorLoss(rank=opt.bsat_rank,
-                                               coupling_weight=opt.bsat_coupling_weight)
+                                               coupling_weight=opt.bsat_coupling_weight,
+                                               energy=opt.bsat_energy,
+                                               soft_temp=opt.bsat_soft_temp,
+                                               bsa_warmup_steps=opt.bsat_warmup_steps)
     else:
         raise NotImplementedError(opt.distill)
 

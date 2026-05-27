@@ -58,6 +58,9 @@ CP_RANK_RATIO=0.5
 TUCKER_RANK_RATIO=0.25
 BSAT_RANK=8
 BSAT_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual BSAT
+BSAT_ENERGY=0.9                   # fraction of Gram trace retained (adaptive rank threshold)
+BSAT_SOFT_TEMP=0.25               # softmax temperature for spectral weighting
+BSAT_WARMUP_STEPS=0               # steps to linearly ramp BSA+coupling (0=disabled)
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
@@ -208,6 +211,9 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
         --bsat_rank ${BSAT_RANK} \
         --bsat_coupling_weight ${BSAT_COUPLING_WEIGHT} \
+        --bsat_energy ${BSAT_ENERGY} \
+        --bsat_soft_temp ${BSAT_SOFT_TEMP} \
+        --bsat_warmup_steps ${BSAT_WARMUP_STEPS} \
         --epochs ${EPOCHS} \
         --learning_rate ${LR} \
         --weight_decay ${WEIGHT_DECAY} \
