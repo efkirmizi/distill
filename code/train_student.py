@@ -58,6 +58,8 @@ def parse_option():
     parser.add_argument('--batch_size', type=int, default=64, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=240, help='number of training epochs')
+    parser.add_argument('--seed', type=int, default=0,
+                        help='random seed for reproducibility (weight init, decomposition, data shuffling)')
 
     parser.add_argument('--start_epoch', type=int, default=1)
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -225,6 +227,11 @@ def main():
 
     opt = parse_option()
 
+    # seed before model/data construction so init + shuffling are reproducible (paired-seed runs)
+    random.seed(opt.seed)
+    np.random.seed(opt.seed)
+    torch.manual_seed(opt.seed)
+    torch.cuda.manual_seed_all(opt.seed)
 
     # dataloader
     if opt.dataset == 'cifar100':
