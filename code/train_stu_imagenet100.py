@@ -1159,6 +1159,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
 
     batch_time, losses, top1, top5 = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
     losses_cls, losses_div, losses_kd = AverageMeter(), AverageMeter(), AverageMeter()
+    nonfinite_cp, nonfinite_tk = 0, 0  # count skipped (non-finite) updates this epoch
     end = time.time()
     train_loader_len = get_loader_len(train_loader, args.batch_size, args.use_dali)
 
@@ -1232,8 +1233,10 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
 
         optimizer.zero_grad()
         if not _loss_is_finite(loss, args.distributed, inp.device):
-            if args.local_rank == 0:
-                print(f'WARNING: non-finite CP loss at epoch {epoch} batch {i}; skipping update.')
+            nonfinite_cp += 1
+            if args.local_rank == 0 and nonfinite_cp == 1:
+                print(f'WARNING: non-finite CP loss at epoch {epoch} (first at batch {i}); '
+                      f'skipping update. Further such warnings suppressed this epoch.')
         else:
             _backward_and_step(loss, optimizer, args.opt_level)
         losses_cls.update(loss_cls.item(), inp.size(0))
@@ -1267,8 +1270,10 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
 
             optimizer_2.zero_grad()
             if not _loss_is_finite(loss_2, args.distributed, inp.device):
-                if args.local_rank == 0:
-                    print(f'WARNING: non-finite Tucker loss at epoch {epoch} batch {i}; skipping update.')
+                nonfinite_tk += 1
+                if args.local_rank == 0 and nonfinite_tk == 1:
+                    print(f'WARNING: non-finite Tucker loss at epoch {epoch} (first at batch {i}); '
+                          f'skipping update. Further such warnings suppressed this epoch.')
             else:
                 _backward_and_step(loss_2, optimizer_2, args.opt_level)
             losses_cls_2.update(loss_cls_2.item(), inp.size(0))
@@ -1317,6 +1322,10 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         if args.prof >= 0 and i == args.prof + 10:
             torch.cuda.cudart().cudaProfilerStop()
             quit()
+
+    if args.local_rank == 0 and (nonfinite_cp or nonfinite_tk):
+        print(f'  [epoch {epoch}] skipped non-finite updates -> CP: {nonfinite_cp}, '
+              f'Tucker: {nonfinite_tk} (of {train_loader_len}).')
 
     if dual:
         return (batch_time.avg, losses.avg, top1.avg, top5.avg,
