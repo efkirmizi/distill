@@ -160,6 +160,11 @@ def parse():
     parser.add_argument('--bsat_subspace_warmup', type=int, default=0,
                         help='linearly ramp the BSA + coupling contribution from 0 to 1 '
                              'over the first N epochs (0 = off)')
+    parser.add_argument('--bsat_disable_bsa', action='store_true',
+                        help='ablation: zero out the BSA term, leaving only AT supervision')
+    parser.add_argument('--single_tucker_student', action='store_true',
+                        help='ablation: decompose student with Tucker instead of CP '
+                             '(mutually exclusive with --dual_bsat; requires --distill pursuhint_bsat)')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -230,6 +235,13 @@ def parse():
     args.model_name = 'S-{}_T-{}_imagenet_{}_r-{}_a-{}_b-{}_{}'.format(
         args.model_s, args.model_t, distill_tag,
         args.gamma, args.alpha, args.beta, args.trial)
+    if args.distill == 'pursuhint_bsat':
+        dual_tag = 'dual' if args.dual_bsat else ('tuck' if args.single_tucker_student else 'cp')
+        args.model_name += '_am-{}_e-{}_t-{}_cw-{}_mode-{}'.format(
+            args.bsat_align_mode, args.bsat_energy, args.bsat_soft_temp,
+            args.bsat_coupling_weight, dual_tag)
+        if args.bsat_disable_bsa:
+            args.model_name += '_nobsa'
     args.model_path = './save/student_model'
 
     if args.distill:
@@ -392,6 +404,10 @@ def main():
 
     if args.dual_bsat and args.distill is None:
         raise ValueError("--dual_bsat requires a --distill method")
+    if args.dual_bsat and args.single_tucker_student:
+        raise ValueError("--dual_bsat and --single_tucker_student are mutually exclusive.")
+    if args.single_tucker_student and args.distill != 'pursuhint_bsat':
+        raise ValueError("--single_tucker_student requires --distill pursuhint_bsat.")
 
     # ---- Test mode ----
     if args.test:
@@ -463,11 +479,19 @@ def main():
     # ---- Model decomposition: runs for pursuhint_bsat OR any dual-student mode ----
     if args.distill == 'pursuhint_bsat' or args.dual_bsat:
         _teacher_for_vbmf = teacher if args.use_vbmf else None
-        rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
-        print(f"==> Decomposing student with CP factorization ({rank_desc})...")
-        model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
-                                  use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
-                                  device='cuda')
+        if args.single_tucker_student:
+            t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
+            print(f"==> Decomposing student with Tucker ({t_rank_desc})...")
+            model_s = decompose_model(model_s, method='tucker',
+                                      tucker_rank_ratio=args.tucker_rank_ratio,
+                                      use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                      device='cuda')
+        else:
+            rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
+            print(f"==> Decomposing student with CP factorization ({rank_desc})...")
+            model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
+                                      use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                      device='cuda')
         model_s.cuda()
         gc.collect()
         if args.dual_bsat:
@@ -1161,10 +1185,12 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                     coup_cp = coup_cp + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
                     coup_tk = coup_tk + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
                 at_tk = parts_tuck['at']
-                bsa_tk = ss * (parts_tuck['bsa'] + coup_tk)
+                disable_bsa = getattr(args, 'bsat_disable_bsa', False)
+                bsa_tk = torch.zeros((), device=inp.device) if disable_bsa else ss * (parts_tuck['bsa'] + coup_tk)
                 loss_kd_2 = at_tk + bsa_tk
             at_cp = parts_cp['at']
-            bsa_cp = ss * (parts_cp['bsa'] + coup_cp)
+            disable_bsa = getattr(args, 'bsat_disable_bsa', False)
+            bsa_cp = torch.zeros((), device=inp.device) if disable_bsa else ss * (parts_cp['bsa'] + coup_cp)
             loss_kd = at_cp + bsa_cp
         else: raise NotImplementedError(args.distill)
 

@@ -290,7 +290,12 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
     echo "[5/5] Running Evaluation Metrics..."
     echo "[5/5] Running evaluation..." >> "${LOG}" 2>&1
 
-    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_${DISTILL_METHOD}_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    # Reconstruct model_name exactly as train_stu_imagenet100.py does
+    STUDENT_NAME="S-${MODEL_S}_T-${MODEL_T}_imagenet_${DISTILL_METHOD}_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    if [ "$DISTILL_METHOD" = "pursuhint_bsat" ]; then
+        STUDENT_NAME="${STUDENT_NAME}_am-${BSAT_ALIGN_MODE}_e-${BSAT_ENERGY}_t-${BSAT_SOFT_TEMP}_cw-${BSAT_COUPLING_WEIGHT}_mode-dual"
+    fi
+    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/${STUDENT_NAME}"
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \
