@@ -154,6 +154,12 @@ def parse():
     parser.add_argument('--bsat_proj_stable', action='store_true',
                         help='stabilize the projector path: float64 decomposition, relative jitter, '
                              'NaN-safe zero-gradient fallback (projector mode only)')
+    parser.add_argument('--bsat_split_losses', action='store_true',
+                        help='give the BSA term its own dynamic loss weight '
+                             '(AT and BSA become separate tasks for the uncertainty weighter)')
+    parser.add_argument('--bsat_subspace_warmup', type=int, default=0,
+                        help='linearly ramp the BSA + coupling contribution from 0 to 1 '
+                             'over the first N epochs (0 = off)')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -612,9 +618,10 @@ def main():
     loss_weighter = None
     loss_weighter_2 = None
     if args.dynamic_loss_weights:
-        loss_weighter = DynamicLossWeighter(num_losses=3).cuda()
+        n_losses = 4 if (args.distill == 'pursuhint_bsat' and args.bsat_split_losses) else 3
+        loss_weighter = DynamicLossWeighter(num_losses=n_losses).cuda()
         if args.dual_bsat:
-            loss_weighter_2 = DynamicLossWeighter(num_losses=3).cuda()
+            loss_weighter_2 = DynamicLossWeighter(num_losses=n_losses).cuda()
 
     if args.dynamic_loss_weights:
         optimizer = torch.optim.SGD([
@@ -1131,26 +1138,41 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         elif args.distill in ['attention', 'WSL_att']: loss_kd = sum(criterion_kd(feat_s, feat_t))
         elif args.distill == 'vid': loss_kd = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s, feat_t, criterion_kd)])
         elif args.distill == 'pursuhint_bsat':
-            loss_kd, proj_cp, _ = criterion_kd(
+            loss_kd, proj_cp, parts_cp = criterion_kd(
                 [f.float() for f in feat_s],
                 [f.float() for f in feat_t]
             )
+            # Linear warmup for the BSA + coupling contribution (0 = off): the
+            # batch-subspace signal is garbage while features are near-constant.
+            warmup = getattr(args, 'bsat_subspace_warmup', 0)
+            ss = 1.0 if warmup <= 0 else min(1.0, epoch / float(warmup))
+            coup_cp = torch.zeros((), device=inp.device)
             if dual:
                 feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t)
-                loss_kd_2, proj_tucker, _ = criterion_kd_2(
+                loss_kd_2, proj_tucker, parts_tuck = criterion_kd_2(
                     [f.float() for f in feat_s2],
                     [f.float() for f in feat_t]
                 )
                 cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
+                coup_tk = torch.zeros((), device=inp.device)
                 for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
-                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
-                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                    coup_cp = coup_cp + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
+                    coup_tk = coup_tk + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                at_tk = parts_tuck['at']
+                bsa_tk = ss * (parts_tuck['bsa'] + coup_tk)
+                loss_kd_2 = at_tk + bsa_tk
+            at_cp = parts_cp['at']
+            bsa_cp = ss * (parts_cp['bsa'] + coup_cp)
+            loss_kd = at_cp + bsa_cp
         else: raise NotImplementedError(args.distill)
 
         if loss_weighter is not None and args.distill != 'kd':
-            loss = loss_weighter(loss_cls, loss_div, loss_kd)
+            if args.distill == 'pursuhint_bsat' and getattr(args, 'bsat_split_losses', False):
+                loss = loss_weighter(loss_cls, loss_div, at_cp, bsa_cp)
+            else:
+                loss = loss_weighter(loss_cls, loss_div, loss_kd)
         else:
             loss = args.gamma * loss_cls + args.alpha * loss_div + args.beta * loss_kd
 
@@ -1182,7 +1204,10 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                     loss_kd_2 = sum([c(f_s2, f_t) for f_s2, f_t, c in zip(feat_s2, feat_t, criterion_kd_2)])
 
             if loss_weighter_2 is not None and args.distill != 'kd':
-                loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
+                if args.distill == 'pursuhint_bsat' and getattr(args, 'bsat_split_losses', False):
+                    loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, at_tk, bsa_tk)
+                else:
+                    loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
             else:
                 loss_2 = args.gamma * loss_cls_2 + args.alpha * loss_div_2 + args.beta * loss_kd_2
 
