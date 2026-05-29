@@ -101,6 +101,11 @@ if [ "$BSAT_SPLIT_LOSSES" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --
 
 # torchrun rendezvous port — change this to a different value for each parallel run
 # (each concurrent torchrun instance must use a unique port on the machine)
+#
+# IMPORTANT for parallel runs: give each job its OWN GPU, e.g.
+#     CUDA_VISIBLE_DEVICES=0 MASTER_PORT=9200 bash run_pipeline_imagenet.sh   # run A
+#     CUDA_VISIBLE_DEVICES=1 MASTER_PORT=9201 bash run_pipeline_imagenet.sh   # run B
+# Two of these dual-student jobs do NOT fit on one card (each needs ~20GB+).
 MASTER_PORT=9200
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
@@ -111,8 +116,11 @@ else
     VBMF_FLAG=""
 fi
 
-# PyTorch Compile Optimization ON/OFF (disabled by default for DDP)
-ENABLE_TORCH_COMPILE=1  # decomposed models have 3-4x more layers; compile can OOMs on CPU RAM
+# PyTorch Compile Optimization ON/OFF
+# Default OFF: decomposed models have 3-4x more layers and the hint-point-dependent
+# input shapes make torchinductor allocate large dynamic buffers -> frequent GPU OOM,
+# especially with two jobs on one card. Turn on only with a GPU to spare.
+ENABLE_TORCH_COMPILE=0
 if [ "$ENABLE_TORCH_COMPILE" -eq 1 ]; then
     TORCH_COMPILE="--torch_compile"
 else
