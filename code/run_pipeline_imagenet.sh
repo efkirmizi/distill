@@ -84,6 +84,21 @@ TUCKER_RANK_RATIO=0.25
 BSAT_RANK=8                       # only used by pursuhint_bsat criterion; harmless for others
 BSAT_COUPLING_WEIGHT=1.0          # only used by pursuhint_bsat criterion; harmless for others
 
+# BSAT knobs. Defaults = adaptive soft-spectral projector (the validated winner).
+BSAT_ALIGN_MODE="projector"       # 'projector' (adaptive soft-spectral, default) or 'gram' (ablation)
+BSAT_DECOMP="eigh"                # 'eigh' (cheap, default) or 'svd' (better-conditioned, heavier)
+BSAT_ENERGY=0.9                   # energy fraction for adaptive effective rank (1.0 = use full cap R)
+BSAT_SOFT_TEMP=0.25               # softmax temperature for soft spectral weights
+BSAT_PROJ_STABLE=0                # 1 = float64 decomposition + relative jitter + NaN-safe
+BSAT_SPLIT_LOSSES=0               # 1 = give the BSA term its own dynamic loss weight
+BSAT_SUBSPACE_WARMUP=0            # epochs to linearly ramp BSA + coupling from 0 (0 = off)
+
+BSAT_EXTRA_FLAGS="--bsat_align_mode ${BSAT_ALIGN_MODE} --bsat_decomp ${BSAT_DECOMP}"
+BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_energy ${BSAT_ENERGY} --bsat_soft_temp ${BSAT_SOFT_TEMP}"
+BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_subspace_warmup ${BSAT_SUBSPACE_WARMUP}"
+if [ "$BSAT_PROJ_STABLE" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_proj_stable"; fi
+if [ "$BSAT_SPLIT_LOSSES" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_split_losses"; fi
+
 # torchrun rendezvous port — change this to a different value for each parallel run
 # (each concurrent torchrun instance must use a unique port on the machine)
 MASTER_PORT=9200
@@ -247,6 +262,7 @@ if [ "$RUN_TRAINING" -eq 1 ]; then
         --tucker_rank_ratio ${TUCKER_RANK_RATIO} \
         --bsat_rank ${BSAT_RANK} \
         --bsat_coupling_weight ${BSAT_COUPLING_WEIGHT} \
+        ${BSAT_EXTRA_FLAGS} \
         --epochs ${STUDENT_EPOCHS} \
         --lr ${LR} \
         --weight-decay ${WEIGHT_DECAY} \
@@ -274,7 +290,12 @@ if [ "$RUN_EVALUATION" -eq 1 ]; then
     echo "[5/5] Running Evaluation Metrics..."
     echo "[5/5] Running evaluation..." >> "${LOG}" 2>&1
 
-    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/S-${MODEL_S}_T-${MODEL_T}_imagenet_${DISTILL_METHOD}_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    # Reconstruct model_name exactly as train_stu_imagenet100.py does
+    STUDENT_NAME="S-${MODEL_S}_T-${MODEL_T}_imagenet_${DISTILL_METHOD}_r-${GAMMA}_a-${ALPHA}_b-${BETA}_${TRIAL}"
+    if [ "$DISTILL_METHOD" = "pursuhint_bsat" ]; then
+        STUDENT_NAME="${STUDENT_NAME}_am-${BSAT_ALIGN_MODE}_e-${BSAT_ENERGY}_t-${BSAT_SOFT_TEMP}_cw-${BSAT_COUPLING_WEIGHT}_mode-dual"
+    fi
+    STUDENT_DIR="./save/student_model/imagenet100/${HINT_POINTS}/${STUDENT_NAME}"
 
     ${PYTHON} evaluate_metrics.py \
         --dataset ${DATASET} \

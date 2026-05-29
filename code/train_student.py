@@ -124,6 +124,11 @@ def parse_option():
     parser.add_argument('--bsat_subspace_warmup', type=int, default=0,
                         help='linearly ramp the BSA + coupling contribution from 0 to 1 '
                              'over the first N epochs (0 = off)')
+    parser.add_argument('--bsat_disable_bsa', action='store_true',
+                        help='ablation: zero out the BSA term, leaving only AT supervision')
+    parser.add_argument('--single_tucker_student', action='store_true',
+                        help='ablation: decompose student with Tucker instead of CP '
+                             '(mutually exclusive with --dual_bsat; requires --distill pursuhint_bsat)')
 
     parser.add_argument('-r', '--gamma', type=float, default=1, help='weight for classification')
     parser.add_argument('-a', '--alpha', type=float, default=None, help='weight balance for KD')
@@ -180,8 +185,22 @@ def parse_option():
     if not opt.model_t:
         opt.model_t = get_teacher_name(opt.path_t)
 
+    if opt.dual_bsat and opt.single_tucker_student:
+        raise ValueError("--dual_bsat and --single_tucker_student are mutually exclusive.")
+    if opt.single_tucker_student and opt.distill != 'pursuhint_bsat':
+        raise ValueError("--single_tucker_student requires --distill pursuhint_bsat.")
+
     opt.model_name = 'S-{}_T-{}_{}_{}_r-{}_a-{}_b-{}_b2-{}_{}'.format(opt.model_s, opt.model_t, opt.dataset, opt.distill,
                                                                 opt.gamma, opt.alpha, opt.beta, opt.beta2, opt.trial)
+    if opt.distill == 'pursuhint_bsat':
+        dual_tag = 'dual' if opt.dual_bsat else ('tuck' if opt.single_tucker_student else 'cp')
+        opt.model_name += '_am-{}_e-{}_t-{}_cw-{}_mode-{}'.format(
+            opt.bsat_align_mode, opt.bsat_energy, opt.bsat_soft_temp,
+            opt.bsat_coupling_weight, dual_tag)
+        if opt.bsat_disable_bsa:
+            opt.model_name += '_nobsa'
+    if opt.seed != 0:
+        opt.model_name += f'_seed-{opt.seed}'
 
 
     if opt.preact:
@@ -284,12 +303,20 @@ def main():
 
     if opt.distill == 'pursuhint_bsat' or opt.dual_bsat:
         _teacher_for_vbmf = model_t if opt.use_vbmf else None
-        rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.cp_rank_ratio}"
-        print(f"==> Decomposing student model with CP factorization ({rank_desc})...")
         _dev = 'cuda' if torch.cuda.is_available() else None
-        model_s = decompose_model(model_s, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
-                                  use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf,
-                                  device=_dev)
+        if opt.single_tucker_student:
+            t_rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.tucker_rank_ratio}"
+            print(f"==> Decomposing student with Tucker ({t_rank_desc})...")
+            model_s = decompose_model(model_s, method='tucker',
+                                      tucker_rank_ratio=opt.tucker_rank_ratio,
+                                      use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                      device=_dev)
+        else:
+            rank_desc = "teacher VBMF" if opt.use_vbmf else f"ratio={opt.cp_rank_ratio}"
+            print(f"==> Decomposing student model with CP factorization ({rank_desc})...")
+            model_s = decompose_model(model_s, method='cp', cp_rank_ratio=opt.cp_rank_ratio,
+                                      use_vbmf=opt.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                      device=_dev)
         model_s = nn.DataParallel(model_s).cuda()
         gc.collect()
         if opt.dual_bsat:

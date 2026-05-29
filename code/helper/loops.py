@@ -235,10 +235,12 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                     coup_cp = coup_cp + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
                     coup_tk = coup_tk + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
                 at_tk = parts_tuck['at']
-                bsa_tk = ss * (parts_tuck['bsa'] + coup_tk)
+                disable_bsa = getattr(opt, 'bsat_disable_bsa', False)
+                bsa_tk = torch.zeros((), device=input.device) if disable_bsa else ss * (parts_tuck['bsa'] + coup_tk)
                 loss_kd_2 = at_tk + bsa_tk
             at_cp = parts_cp['at']
-            bsa_cp = ss * (parts_cp['bsa'] + coup_cp)
+            disable_bsa = getattr(opt, 'bsat_disable_bsa', False)
+            bsa_cp = torch.zeros((), device=input.device) if disable_bsa else ss * (parts_cp['bsa'] + coup_cp)
             loss_kd = at_cp + bsa_cp
         else:
             raise NotImplementedError(opt.distill)

@@ -154,6 +154,17 @@ def parse():
     parser.add_argument('--bsat_proj_stable', action='store_true',
                         help='stabilize the projector path: float64 decomposition, relative jitter, '
                              'NaN-safe zero-gradient fallback (projector mode only)')
+    parser.add_argument('--bsat_split_losses', action='store_true',
+                        help='give the BSA term its own dynamic loss weight '
+                             '(AT and BSA become separate tasks for the uncertainty weighter)')
+    parser.add_argument('--bsat_subspace_warmup', type=int, default=0,
+                        help='linearly ramp the BSA + coupling contribution from 0 to 1 '
+                             'over the first N epochs (0 = off)')
+    parser.add_argument('--bsat_disable_bsa', action='store_true',
+                        help='ablation: zero out the BSA term, leaving only AT supervision')
+    parser.add_argument('--single_tucker_student', action='store_true',
+                        help='ablation: decompose student with Tucker instead of CP '
+                             '(mutually exclusive with --dual_bsat; requires --distill pursuhint_bsat)')
 
     # Loss weights
     parser.add_argument('--alpha', type=float, default=0.9,
@@ -224,6 +235,13 @@ def parse():
     args.model_name = 'S-{}_T-{}_imagenet_{}_r-{}_a-{}_b-{}_{}'.format(
         args.model_s, args.model_t, distill_tag,
         args.gamma, args.alpha, args.beta, args.trial)
+    if args.distill == 'pursuhint_bsat':
+        dual_tag = 'dual' if args.dual_bsat else ('tuck' if args.single_tucker_student else 'cp')
+        args.model_name += '_am-{}_e-{}_t-{}_cw-{}_mode-{}'.format(
+            args.bsat_align_mode, args.bsat_energy, args.bsat_soft_temp,
+            args.bsat_coupling_weight, dual_tag)
+        if args.bsat_disable_bsa:
+            args.model_name += '_nobsa'
     args.model_path = './save/student_model'
 
     if args.distill:
@@ -386,6 +404,10 @@ def main():
 
     if args.dual_bsat and args.distill is None:
         raise ValueError("--dual_bsat requires a --distill method")
+    if args.dual_bsat and args.single_tucker_student:
+        raise ValueError("--dual_bsat and --single_tucker_student are mutually exclusive.")
+    if args.single_tucker_student and args.distill != 'pursuhint_bsat':
+        raise ValueError("--single_tucker_student requires --distill pursuhint_bsat.")
 
     # ---- Test mode ----
     if args.test:
@@ -457,11 +479,19 @@ def main():
     # ---- Model decomposition: runs for pursuhint_bsat OR any dual-student mode ----
     if args.distill == 'pursuhint_bsat' or args.dual_bsat:
         _teacher_for_vbmf = teacher if args.use_vbmf else None
-        rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
-        print(f"==> Decomposing student with CP factorization ({rank_desc})...")
-        model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
-                                  use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
-                                  device='cuda')
+        if args.single_tucker_student:
+            t_rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.tucker_rank_ratio}"
+            print(f"==> Decomposing student with Tucker ({t_rank_desc})...")
+            model_s = decompose_model(model_s, method='tucker',
+                                      tucker_rank_ratio=args.tucker_rank_ratio,
+                                      use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                      device='cuda')
+        else:
+            rank_desc = "teacher VBMF" if args.use_vbmf else f"ratio={args.cp_rank_ratio}"
+            print(f"==> Decomposing student with CP factorization ({rank_desc})...")
+            model_s = decompose_model(model_s, method='cp', cp_rank_ratio=args.cp_rank_ratio,
+                                      use_vbmf=args.use_vbmf, teacher_model=_teacher_for_vbmf,
+                                      device='cuda')
         model_s.cuda()
         gc.collect()
         if args.dual_bsat:
@@ -612,9 +642,10 @@ def main():
     loss_weighter = None
     loss_weighter_2 = None
     if args.dynamic_loss_weights:
-        loss_weighter = DynamicLossWeighter(num_losses=3).cuda()
+        n_losses = 4 if (args.distill == 'pursuhint_bsat' and args.bsat_split_losses) else 3
+        loss_weighter = DynamicLossWeighter(num_losses=n_losses).cuda()
         if args.dual_bsat:
-            loss_weighter_2 = DynamicLossWeighter(num_losses=3).cuda()
+            loss_weighter_2 = DynamicLossWeighter(num_losses=n_losses).cuda()
 
     if args.dynamic_loss_weights:
         optimizer = torch.optim.SGD([
@@ -1079,6 +1110,34 @@ def train(train_loader, model, criterion, optimizer, epoch):
     return batch_time.avg, losses.avg, top1.avg, top5.avg
 
 
+def _loss_is_finite(loss, distributed, device):
+    """DDP-safe finiteness check (parity with CIFAR loops.py non-finite guard).
+
+    Returns True only if ``loss`` is finite on *every* rank, so all ranks make
+    the identical skip/step decision and no rank is left hanging in the
+    gradient all-reduce. In single-process mode this is just torch.isfinite.
+    """
+    finite = bool(torch.isfinite(loss))
+    if distributed:
+        flag = torch.tensor([1.0 if finite else 0.0], device=device)
+        torch.distributed.all_reduce(flag, op=torch.distributed.ReduceOp.MIN)
+        finite = flag.item() > 0
+    return finite
+
+
+def _backward_and_step(loss, optimizer, opt_level):
+    """Backward + grad-clip(10.0) + step, AMP-aware (parity with CIFAR loops.py)."""
+    if opt_level is not None:
+        with amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+        torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), max_norm=10.0)
+    else:
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            [p for group in optimizer.param_groups for p in group['params']], max_norm=10.0)
+    optimizer.step()
+
+
 def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
              module_list_2=None, criterion_list_2=None, optimizer_2=None,
              loss_weighter=None, loss_weighter_2=None):
@@ -1131,35 +1190,52 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
         elif args.distill in ['attention', 'WSL_att']: loss_kd = sum(criterion_kd(feat_s, feat_t))
         elif args.distill == 'vid': loss_kd = sum([c(f_s, f_t) for f_s, f_t, c in zip(feat_s, feat_t, criterion_kd)])
         elif args.distill == 'pursuhint_bsat':
-            loss_kd, proj_cp, _ = criterion_kd(
+            loss_kd, proj_cp, parts_cp = criterion_kd(
                 [f.float() for f in feat_s],
                 [f.float() for f in feat_t]
             )
+            # Linear warmup for the BSA + coupling contribution (0 = off): the
+            # batch-subspace signal is garbage while features are near-constant.
+            warmup = getattr(args, 'bsat_subspace_warmup', 0)
+            ss = 1.0 if warmup <= 0 else min(1.0, epoch / float(warmup))
+            coup_cp = torch.zeros((), device=inp.device)
             if dual:
                 feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
                 loss_cls_2 = criterion_cls_2(logit_s2, target)
                 loss_div_2 = criterion_div_2(logit_s2, logit_t)
-                loss_kd_2, proj_tucker, _ = criterion_kd_2(
+                loss_kd_2, proj_tucker, parts_tuck = criterion_kd_2(
                     [f.float() for f in feat_s2],
                     [f.float() for f in feat_t]
                 )
                 cw = getattr(criterion_kd_2, 'coupling_weight', 1.0)
+                coup_tk = torch.zeros((), device=inp.device)
                 for P_cp_i, P_tuck_i in zip(proj_cp, proj_tucker):
-                    loss_kd   = loss_kd   + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
-                    loss_kd_2 = loss_kd_2 + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                    coup_cp = coup_cp + cw * F.mse_loss(P_cp_i, P_tuck_i.detach())
+                    coup_tk = coup_tk + cw * F.mse_loss(P_tuck_i, P_cp_i.detach())
+                at_tk = parts_tuck['at']
+                disable_bsa = getattr(args, 'bsat_disable_bsa', False)
+                bsa_tk = torch.zeros((), device=inp.device) if disable_bsa else ss * (parts_tuck['bsa'] + coup_tk)
+                loss_kd_2 = at_tk + bsa_tk
+            at_cp = parts_cp['at']
+            disable_bsa = getattr(args, 'bsat_disable_bsa', False)
+            bsa_cp = torch.zeros((), device=inp.device) if disable_bsa else ss * (parts_cp['bsa'] + coup_cp)
+            loss_kd = at_cp + bsa_cp
         else: raise NotImplementedError(args.distill)
 
         if loss_weighter is not None and args.distill != 'kd':
-            loss = loss_weighter(loss_cls, loss_div, loss_kd)
+            if args.distill == 'pursuhint_bsat' and getattr(args, 'bsat_split_losses', False):
+                loss = loss_weighter(loss_cls, loss_div, at_cp, bsa_cp)
+            else:
+                loss = loss_weighter(loss_cls, loss_div, loss_kd)
         else:
             loss = args.gamma * loss_cls + args.alpha * loss_div + args.beta * loss_kd
 
         optimizer.zero_grad()
-        if args.opt_level is not None:
-            with amp.scale_loss(loss, optimizer) as scaled_loss: scaled_loss.backward()
+        if not _loss_is_finite(loss, args.distributed, inp.device):
+            if args.local_rank == 0:
+                print(f'WARNING: non-finite CP loss at epoch {epoch} batch {i}; skipping update.')
         else:
-            loss.backward()
-        optimizer.step()
+            _backward_and_step(loss, optimizer, args.opt_level)
         losses_cls.update(loss_cls.item(), inp.size(0))
         losses_div.update(loss_div.item(), inp.size(0))
         losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
@@ -1182,16 +1258,19 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                     loss_kd_2 = sum([c(f_s2, f_t) for f_s2, f_t, c in zip(feat_s2, feat_t, criterion_kd_2)])
 
             if loss_weighter_2 is not None and args.distill != 'kd':
-                loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
+                if args.distill == 'pursuhint_bsat' and getattr(args, 'bsat_split_losses', False):
+                    loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, at_tk, bsa_tk)
+                else:
+                    loss_2 = loss_weighter_2(loss_cls_2, loss_div_2, loss_kd_2)
             else:
                 loss_2 = args.gamma * loss_cls_2 + args.alpha * loss_div_2 + args.beta * loss_kd_2
 
             optimizer_2.zero_grad()
-            if args.opt_level is not None:
-                with amp.scale_loss(loss_2, optimizer_2) as scaled_loss_2: scaled_loss_2.backward()
+            if not _loss_is_finite(loss_2, args.distributed, inp.device):
+                if args.local_rank == 0:
+                    print(f'WARNING: non-finite Tucker loss at epoch {epoch} batch {i}; skipping update.')
             else:
-                loss_2.backward()
-            optimizer_2.step()
+                _backward_and_step(loss_2, optimizer_2, args.opt_level)
             losses_cls_2.update(loss_cls_2.item(), inp.size(0))
             losses_div_2.update(loss_div_2.item(), inp.size(0))
             losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else float(loss_kd_2), inp.size(0))
