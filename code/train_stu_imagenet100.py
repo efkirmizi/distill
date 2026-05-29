@@ -1110,6 +1110,34 @@ def train(train_loader, model, criterion, optimizer, epoch):
     return batch_time.avg, losses.avg, top1.avg, top5.avg
 
 
+def _loss_is_finite(loss, distributed, device):
+    """DDP-safe finiteness check (parity with CIFAR loops.py non-finite guard).
+
+    Returns True only if ``loss`` is finite on *every* rank, so all ranks make
+    the identical skip/step decision and no rank is left hanging in the
+    gradient all-reduce. In single-process mode this is just torch.isfinite.
+    """
+    finite = bool(torch.isfinite(loss))
+    if distributed:
+        flag = torch.tensor([1.0 if finite else 0.0], device=device)
+        torch.distributed.all_reduce(flag, op=torch.distributed.ReduceOp.MIN)
+        finite = flag.item() > 0
+    return finite
+
+
+def _backward_and_step(loss, optimizer, opt_level):
+    """Backward + grad-clip(10.0) + step, AMP-aware (parity with CIFAR loops.py)."""
+    if opt_level is not None:
+        with amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+        torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), max_norm=10.0)
+    else:
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            [p for group in optimizer.param_groups for p in group['params']], max_norm=10.0)
+    optimizer.step()
+
+
 def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
              module_list_2=None, criterion_list_2=None, optimizer_2=None,
              loss_weighter=None, loss_weighter_2=None):
@@ -1203,11 +1231,11 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             loss = args.gamma * loss_cls + args.alpha * loss_div + args.beta * loss_kd
 
         optimizer.zero_grad()
-        if args.opt_level is not None:
-            with amp.scale_loss(loss, optimizer) as scaled_loss: scaled_loss.backward()
+        if not _loss_is_finite(loss, args.distributed, inp.device):
+            if args.local_rank == 0:
+                print(f'WARNING: non-finite CP loss at epoch {epoch} batch {i}; skipping update.')
         else:
-            loss.backward()
-        optimizer.step()
+            _backward_and_step(loss, optimizer, args.opt_level)
         losses_cls.update(loss_cls.item(), inp.size(0))
         losses_div.update(loss_div.item(), inp.size(0))
         losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
@@ -1238,11 +1266,11 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                 loss_2 = args.gamma * loss_cls_2 + args.alpha * loss_div_2 + args.beta * loss_kd_2
 
             optimizer_2.zero_grad()
-            if args.opt_level is not None:
-                with amp.scale_loss(loss_2, optimizer_2) as scaled_loss_2: scaled_loss_2.backward()
+            if not _loss_is_finite(loss_2, args.distributed, inp.device):
+                if args.local_rank == 0:
+                    print(f'WARNING: non-finite Tucker loss at epoch {epoch} batch {i}; skipping update.')
             else:
-                loss_2.backward()
-            optimizer_2.step()
+                _backward_and_step(loss_2, optimizer_2, args.opt_level)
             losses_cls_2.update(loss_cls_2.item(), inp.size(0))
             losses_div_2.update(loss_div_2.item(), inp.size(0))
             losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else float(loss_kd_2), inp.size(0))
