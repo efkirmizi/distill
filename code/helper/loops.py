@@ -120,6 +120,7 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         top1_2 = AverageMeter()
         top5_2 = AverageMeter()
 
+    nonfinite_cp, nonfinite_tk = 0, 0
     end = time.time()
     for idx, data in enumerate(train_loader):
         if opt.distill in ['crd'] or opt.distill == 'WSL_crd'  or opt.distill == 'ATT_crd':
@@ -263,7 +264,10 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
 
         # ===================backward CP=====================
         if not torch.isfinite(loss):
-            print(f'WARNING: non-finite CP loss {loss.item()} at epoch {epoch} batch {idx}; skipping update.')
+            nonfinite_cp += 1
+            if nonfinite_cp == 1:
+                print(f'WARNING: non-finite CP loss at epoch {epoch} batch {idx}; skipping update. '
+                      f'Further such warnings suppressed this epoch.')
             optimizer.zero_grad()
         else:
             optimizer.zero_grad()
@@ -315,7 +319,10 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             top5_2.update(acc5_2[0], input.size(0))
 
             if not torch.isfinite(loss_2):
-                print(f'WARNING: non-finite Tucker loss {loss_2.item()} at epoch {epoch} batch {idx}; skipping update.')
+                nonfinite_tk += 1
+                if nonfinite_tk == 1:
+                    print(f'WARNING: non-finite Tucker loss at epoch {epoch} batch {idx}; skipping update. '
+                          f'Further such warnings suppressed this epoch.')
                 optimizer_2.zero_grad()
             else:
                 optimizer_2.zero_grad()
@@ -342,6 +349,10 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
 
     print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
           .format(top1=top1, top5=top5))
+
+    if nonfinite_cp or nonfinite_tk:
+        print(f'  [epoch {epoch}] skipped non-finite updates -> CP: {nonfinite_cp}, '
+              f'Tucker: {nonfinite_tk} (of {len(train_loader)}).')
 
     if dual:
         return (top1.avg, top5.avg, losses.avg, losses_cls.avg, losses_div.avg, losses_kd.avg,

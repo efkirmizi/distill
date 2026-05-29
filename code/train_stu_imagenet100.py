@@ -1198,7 +1198,7 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             # Linear warmup for the BSA + coupling contribution (0 = off): the
             # batch-subspace signal is garbage while features are near-constant.
             warmup = getattr(args, 'bsat_subspace_warmup', 0)
-            ss = 1.0 if warmup <= 0 else min(1.0, epoch / float(warmup))
+            ss = 1.0 if warmup <= 0 else min(1.0, (epoch + 1) / float(warmup))
             coup_cp = torch.zeros((), device=inp.device)
             if dual:
                 feat_s2, logit_s2 = model_s2(inp, is_feat=True, preact=args.preact, hint_points=args.s_points)
