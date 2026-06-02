@@ -1126,16 +1126,25 @@ def _loss_is_finite(loss, distributed, device):
 
 
 def _backward_and_step(loss, optimizer, opt_level):
-    """Backward + grad-clip(10.0) + step, AMP-aware (parity with CIFAR loops.py)."""
+    """Backward + grad-clip(10.0) + step, AMP-aware. Returns True iff step was taken.
+
+    A finite loss can still produce NaN/Inf gradients (e.g. eigh backward when two
+    eigenvalues are nearly equal: grad ∝ 1/(λᵢ−λⱼ) → ∞). clip_grad_norm_ returns
+    NaN in that case, which would corrupt weights. We check the norm and skip.
+    """
     if opt_level is not None:
         with amp.scale_loss(loss, optimizer) as scaled_loss:
             scaled_loss.backward()
-        torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), max_norm=10.0)
+        total_norm = torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), max_norm=10.0)
     else:
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(
+        total_norm = torch.nn.utils.clip_grad_norm_(
             [p for group in optimizer.param_groups for p in group['params']], max_norm=10.0)
+    if not torch.isfinite(total_norm):
+        optimizer.zero_grad()
+        return False
     optimizer.step()
+    return True
 
 
 def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
@@ -1237,8 +1246,11 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             if args.local_rank == 0 and nonfinite_cp == 1:
                 print(f'WARNING: non-finite CP loss at epoch {epoch} (first at batch {i}); '
                       f'skipping update. Further such warnings suppressed this epoch.')
-        else:
-            _backward_and_step(loss, optimizer, args.opt_level)
+        elif not _backward_and_step(loss, optimizer, args.opt_level):
+            nonfinite_cp += 1
+            if args.local_rank == 0 and nonfinite_cp == 1:
+                print(f'WARNING: NaN CP gradients at epoch {epoch} (first at batch {i}); '
+                      f'skipping update. Further such warnings suppressed this epoch.')
         losses_cls.update(loss_cls.item(), inp.size(0))
         losses_div.update(loss_div.item(), inp.size(0))
         losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
@@ -1274,8 +1286,11 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                 if args.local_rank == 0 and nonfinite_tk == 1:
                     print(f'WARNING: non-finite Tucker loss at epoch {epoch} (first at batch {i}); '
                           f'skipping update. Further such warnings suppressed this epoch.')
-            else:
-                _backward_and_step(loss_2, optimizer_2, args.opt_level)
+            elif not _backward_and_step(loss_2, optimizer_2, args.opt_level):
+                nonfinite_tk += 1
+                if args.local_rank == 0 and nonfinite_tk == 1:
+                    print(f'WARNING: NaN Tucker gradients at epoch {epoch} (first at batch {i}); '
+                          f'skipping update. Further such warnings suppressed this epoch.')
             losses_cls_2.update(loss_cls_2.item(), inp.size(0))
             losses_div_2.update(loss_div_2.item(), inp.size(0))
             losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else float(loss_kd_2), inp.size(0))

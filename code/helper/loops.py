@@ -272,9 +272,19 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
         else:
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(
+            total_norm = torch.nn.utils.clip_grad_norm_(
                 [p for group in optimizer.param_groups for p in group['params']], max_norm=10.0)
-            optimizer.step()
+            if not torch.isfinite(total_norm):
+                # eigh backward can produce NaN/Inf gradients when eigenvalues are nearly
+                # equal (grad ∝ 1/(λᵢ−λⱼ)). clip_grad_norm_ returns NaN in that case.
+                # Skipping here prevents weight corruption from a silent NaN gradient step.
+                nonfinite_cp += 1
+                if nonfinite_cp == 1:
+                    print(f'WARNING: NaN CP gradients at epoch {epoch} batch {idx}; skipping update. '
+                          f'Further such warnings suppressed this epoch.')
+                optimizer.zero_grad()
+            else:
+                optimizer.step()
 
         # ===================forward+backward Tucker student (dual mode)=====================
         if dual:
@@ -327,9 +337,16 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             else:
                 optimizer_2.zero_grad()
                 loss_2.backward()
-                torch.nn.utils.clip_grad_norm_(
+                total_norm_2 = torch.nn.utils.clip_grad_norm_(
                     [p for group in optimizer_2.param_groups for p in group['params']], max_norm=10.0)
-                optimizer_2.step()
+                if not torch.isfinite(total_norm_2):
+                    nonfinite_tk += 1
+                    if nonfinite_tk == 1:
+                        print(f'WARNING: NaN Tucker gradients at epoch {epoch} batch {idx}; skipping update. '
+                              f'Further such warnings suppressed this epoch.')
+                    optimizer_2.zero_grad()
+                else:
+                    optimizer_2.step()
 
         # ===================meters=====================
         batch_time.update(time.time() - end)
