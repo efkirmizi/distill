@@ -144,9 +144,9 @@ echo "Log file: ${LOG}"
 # ==============================================================================
 # Flags  (set to 1 to enable, 0 to skip a step)
 # ==============================================================================
-RUN_TEACHER=1
-RUN_HINTS=1
-RUN_CLUSTERING=1
+RUN_TEACHER=0
+RUN_HINTS=0
+RUN_CLUSTERING=0
 RUN_TRAINING=1
 RUN_EVALUATION=1
 
