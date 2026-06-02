@@ -90,7 +90,7 @@ BSAT_DECOMP="eigh"                # 'eigh' (cheap, default) or 'svd' (better-con
 BSAT_ENERGY=0.9                   # energy fraction for adaptive effective rank (0.9 = keep dims that cover 90% of variance)
 BSAT_SOFT_TEMP=1.0                # softmax temperature; 1.0 → eigenvalue-proportional weights (principled midpoint)
 BSAT_PROJ_STABLE=1                # float64 decomp + relative diagonal jitter prevents near-degenerate eigenvalues
-BSAT_SPLIT_LOSSES=0               # 1 = give the BSA term its own dynamic loss weight
+BSAT_SPLIT_LOSSES=1               # 1 = give the BSA term its own dynamic loss weight
 BSAT_SUBSPACE_WARMUP=0            # epochs to linearly ramp BSA + coupling from 0 (0 = off)
 
 BSAT_EXTRA_FLAGS="--bsat_align_mode ${BSAT_ALIGN_MODE} --bsat_decomp ${BSAT_DECOMP}"
