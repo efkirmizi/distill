@@ -87,8 +87,8 @@ BSAT_COUPLING_WEIGHT=1.0          # only used by pursuhint_bsat criterion; harml
 # BSAT knobs. Defaults = adaptive soft-spectral projector (the validated winner).
 BSAT_ALIGN_MODE="projector"       # 'projector' (adaptive soft-spectral, default) or 'gram' (ablation)
 BSAT_DECOMP="eigh"                # 'eigh' (cheap, default) or 'svd' (better-conditioned, heavier)
-BSAT_ENERGY=1.0                   # energy fraction for adaptive effective rank (1.0 = use full cap R)
-BSAT_SOFT_TEMP=100.0              # softmax temperature; large value → uniform weights → hard rank-R projector
+BSAT_ENERGY=0.9                   # energy fraction for adaptive effective rank (0.9 = keep dims that cover 90% of variance)
+BSAT_SOFT_TEMP=1.0                # softmax temperature; 1.0 → eigenvalue-proportional weights (principled midpoint)
 BSAT_PROJ_STABLE=1                # float64 decomp + relative diagonal jitter prevents near-degenerate eigenvalues
 BSAT_SPLIT_LOSSES=0               # 1 = give the BSA term its own dynamic loss weight
 BSAT_SUBSPACE_WARMUP=0            # epochs to linearly ramp BSA + coupling from 0 (0 = off)
