@@ -218,7 +218,7 @@ class Normalize(nn.Module):
 
     def forward(self, x):
         norm = x.pow(self.power).sum(1, keepdim=True).pow(1. / self.power)
-        out = x.div(norm)
+        out = x.div(norm + 1e-8)
         return out
 
 

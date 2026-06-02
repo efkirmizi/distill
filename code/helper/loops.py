@@ -255,12 +255,6 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
             loss = opt.gamma * loss_cls + opt.alpha * loss_div + opt.beta * loss_kd
 
         acc1, acc5 = accuracy(logit_s, target, topk=(1, 5))
-        losses.update(loss.item(), input.size(0))
-        losses_cls.update(loss_cls.item(), input.size(0))
-        losses_div.update(loss_div.item(), input.size(0))
-        losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else loss_kd, input.size(0))
-        top1.update(acc1[0], input.size(0))
-        top5.update(acc5[0], input.size(0))
 
         # ===================backward CP=====================
         if not torch.isfinite(loss):
@@ -270,6 +264,14 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                       f'Further such warnings suppressed this epoch.')
             optimizer.zero_grad()
         else:
+            # Only update meters when loss is finite; NaN entries would poison the
+            # running average for the rest of the epoch, making diagnostics useless.
+            losses.update(loss.item(), input.size(0))
+            losses_cls.update(loss_cls.item(), input.size(0))
+            losses_div.update(loss_div.item(), input.size(0))
+            losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else loss_kd, input.size(0))
+            top1.update(acc1[0], input.size(0))
+            top5.update(acc5[0], input.size(0))
             optimizer.zero_grad()
             loss.backward()
             total_norm = torch.nn.utils.clip_grad_norm_(
@@ -321,12 +323,6 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                     loss_2 = opt.gamma * loss_cls_2 + opt.alpha * loss_div_2 + opt.beta * loss_kd_2
 
             acc1_2, acc5_2 = accuracy(logit_s2, target, topk=(1, 5))
-            losses_2.update(loss_2.item(), input.size(0))
-            losses_cls_2.update(loss_cls_2.item(), input.size(0))
-            losses_div_2.update(loss_div_2.item(), input.size(0))
-            losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else loss_kd_2, input.size(0))
-            top1_2.update(acc1_2[0], input.size(0))
-            top5_2.update(acc5_2[0], input.size(0))
 
             if not torch.isfinite(loss_2):
                 nonfinite_tk += 1
@@ -335,6 +331,12 @@ def train_distill(epoch, train_loader, module_list, criterion_list, optimizer, o
                           f'Further such warnings suppressed this epoch.')
                 optimizer_2.zero_grad()
             else:
+                losses_2.update(loss_2.item(), input.size(0))
+                losses_cls_2.update(loss_cls_2.item(), input.size(0))
+                losses_div_2.update(loss_div_2.item(), input.size(0))
+                losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else loss_kd_2, input.size(0))
+                top1_2.update(acc1_2[0], input.size(0))
+                top5_2.update(acc5_2[0], input.size(0))
                 optimizer_2.zero_grad()
                 loss_2.backward()
                 total_norm_2 = torch.nn.utils.clip_grad_norm_(

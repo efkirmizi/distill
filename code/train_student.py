@@ -693,6 +693,7 @@ def main():
     if opt.resume:
         cp_path = os.path.join(opt.resume, 'checkpoint_cp.pth')
         tk_path = os.path.join(opt.resume, 'checkpoint_tucker.pth')
+        ckpt = None
         if os.path.isfile(cp_path):
             print(f"=> loading CP checkpoint '{cp_path}'")
             ckpt = torch.load(cp_path, map_location='cpu')
@@ -710,10 +711,11 @@ def main():
                 print(f"=> loading Tucker checkpoint '{tk_path}'")
                 ckpt2 = torch.load(tk_path, map_location='cpu')
                 tk_epoch = ckpt2['epoch']
-                if tk_epoch != ckpt['epoch']:
-                    print(f"=> Warning: CP epoch ({ckpt['epoch']}) != Tucker epoch ({tk_epoch}). "
-                          f"Resuming both from epoch {min(ckpt['epoch'], tk_epoch)}.")
-                    opt.start_epoch = min(ckpt['epoch'], tk_epoch) + 1
+                cp_epoch = ckpt['epoch'] if ckpt is not None else tk_epoch
+                if tk_epoch != cp_epoch:
+                    print(f"=> Warning: CP epoch ({cp_epoch}) != Tucker epoch ({tk_epoch}). "
+                          f"Resuming both from epoch {min(cp_epoch, tk_epoch)}.")
+                    opt.start_epoch = min(cp_epoch, tk_epoch) + 1
                 best_acc_2 = ckpt2.get('best_acc', 0.0)
                 model_s2.load_state_dict(ckpt2['model'])
                 optimizer_2.load_state_dict(ckpt2['optimizer'])

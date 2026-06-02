@@ -78,10 +78,12 @@ class CoupledTensorLoss(nn.Module):
         via eigh(M Mᵀ) or svd(M). M is expected pre-scaled. Returns (evals, evecs).
         """
         B = M.shape[0]
-        if self.decomp == 'svd':
+        if self.decomp == 'svd' and not self.proj_stable:
             # Left singular vectors of M == eigenvectors of G; SVD avoids forming
             # G (which squares the condition number). torch.linalg.svd sorts
             # descending, so flip to match eigh's ascending convention.
+            # When proj_stable=True we fall through to the jittered eigh path
+            # regardless of decomp — SVD offers no jitter protection for backward.
             U, S, _ = torch.linalg.svd(M, full_matrices=False)
             evecs = torch.flip(U, dims=[1])
             evals = torch.flip(S, dims=[0]).pow(2)        # eigenvalues of G = σ²

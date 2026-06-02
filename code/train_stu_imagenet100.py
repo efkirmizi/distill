@@ -1246,14 +1246,17 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
             if args.local_rank == 0 and nonfinite_cp == 1:
                 print(f'WARNING: non-finite CP loss at epoch {epoch} (first at batch {i}); '
                       f'skipping update. Further such warnings suppressed this epoch.')
-        elif not _backward_and_step(loss, optimizer, args.opt_level):
-            nonfinite_cp += 1
-            if args.local_rank == 0 and nonfinite_cp == 1:
-                print(f'WARNING: NaN CP gradients at epoch {epoch} (first at batch {i}); '
-                      f'skipping update. Further such warnings suppressed this epoch.')
-        losses_cls.update(loss_cls.item(), inp.size(0))
-        losses_div.update(loss_div.item(), inp.size(0))
-        losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
+        else:
+            # Update component meters only when total loss is finite; NaN entries would
+            # poison the running average for the rest of the epoch.
+            losses_cls.update(loss_cls.item(), inp.size(0))
+            losses_div.update(loss_div.item(), inp.size(0))
+            losses_kd.update(loss_kd.item() if hasattr(loss_kd, 'item') else float(loss_kd), inp.size(0))
+            if not _backward_and_step(loss, optimizer, args.opt_level):
+                nonfinite_cp += 1
+                if args.local_rank == 0 and nonfinite_cp == 1:
+                    print(f'WARNING: NaN CP gradients at epoch {epoch} (first at batch {i}); '
+                          f'skipping update. Further such warnings suppressed this epoch.')
 
         # ---- Process Tucker Student ----
         if dual:
@@ -1286,14 +1289,15 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                 if args.local_rank == 0 and nonfinite_tk == 1:
                     print(f'WARNING: non-finite Tucker loss at epoch {epoch} (first at batch {i}); '
                           f'skipping update. Further such warnings suppressed this epoch.')
-            elif not _backward_and_step(loss_2, optimizer_2, args.opt_level):
-                nonfinite_tk += 1
-                if args.local_rank == 0 and nonfinite_tk == 1:
-                    print(f'WARNING: NaN Tucker gradients at epoch {epoch} (first at batch {i}); '
-                          f'skipping update. Further such warnings suppressed this epoch.')
-            losses_cls_2.update(loss_cls_2.item(), inp.size(0))
-            losses_div_2.update(loss_div_2.item(), inp.size(0))
-            losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else float(loss_kd_2), inp.size(0))
+            else:
+                losses_cls_2.update(loss_cls_2.item(), inp.size(0))
+                losses_div_2.update(loss_div_2.item(), inp.size(0))
+                losses_kd_2.update(loss_kd_2.item() if hasattr(loss_kd_2, 'item') else float(loss_kd_2), inp.size(0))
+                if not _backward_and_step(loss_2, optimizer_2, args.opt_level):
+                    nonfinite_tk += 1
+                    if args.local_rank == 0 and nonfinite_tk == 1:
+                        print(f'WARNING: NaN Tucker gradients at epoch {epoch} (first at batch {i}); '
+                              f'skipping update. Further such warnings suppressed this epoch.')
 
         # ---- Logging & Metrics ----
         if i % args.print_freq == 0:
@@ -1310,11 +1314,12 @@ def train_kd(train_loader, module_list, criterion_list, optimizer, epoch,
                 reduced_loss = loss.data
                 if dual: reduced_loss_2 = loss_2.data
 
-            losses.update(to_python_float(reduced_loss), inp.size(0))
-            top1.update(to_python_float(acc1), inp.size(0))
-            top5.update(to_python_float(acc5), inp.size(0))
+            if torch.isfinite(reduced_loss):
+                losses.update(to_python_float(reduced_loss), inp.size(0))
+                top1.update(to_python_float(acc1), inp.size(0))
+                top5.update(to_python_float(acc5), inp.size(0))
 
-            if dual:
+            if dual and torch.isfinite(reduced_loss_2):
                 losses_2.update(to_python_float(reduced_loss_2), inp.size(0))
                 top1_2.update(to_python_float(acc1_2), inp.size(0))
                 top5_2.update(to_python_float(acc5_2), inp.size(0))
