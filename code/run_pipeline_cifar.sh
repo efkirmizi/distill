@@ -31,11 +31,11 @@ TRIAL=0
 #   hint            GAMMA=1.0  ALPHA=4.0  BETA=1000.0
 #   WSL_att         GAMMA=1.0  ALPHA=4.0  BETA=1000.0
 #   vid             GAMMA=1.0  ALPHA=4.0  BETA=1000.0
-DISTILL_METHOD="kd"
+DISTILL_METHOD="pursuhint_bsat"
 NUM_LAYERS=18                         # vgg13 has 4 pooling-separated blocks
 NUM_CLUSTERS=3                       # must match vgg8 student's s_points (1,2,3)
 METRIC="r2"
-EPOCHS=1
+EPOCHS=240
 LR_DECAY_EPOCHS="150,180,210"
 BATCH=64
 NUM_WORKERS=4
@@ -50,7 +50,7 @@ HINTS_DIR="./save/hints/${MODEL_T}_${DATASET}_best"
 # Student training loss weights (Optimized 65/15/20 Split)
 GAMMA=1.0
 ALPHA=4.0
-BETA=0.0
+BETA=25.0
 
 # CP / Tucker Rank Ratios and BSAT Rank
 # (used when USE_VBMF=0; ignored for rank selection when USE_VBMF=1)
@@ -62,11 +62,11 @@ BSAT_COUPLING_WEIGHT=1.0          # weight for Tucker←CP coupling term in dual
 # BSAT knobs. Defaults = adaptive soft-spectral projector (the validated winner).
 BSAT_ALIGN_MODE="projector"       # 'projector' (adaptive soft-spectral, default) or 'gram' (ablation)
 BSAT_DECOMP="eigh"                # 'eigh' (cheap, default) or 'svd' (better-conditioned, heavier)
-BSAT_ENERGY=0.9                   # energy fraction for adaptive effective rank (1.0 = use full cap R)
-BSAT_SOFT_TEMP=0.25               # softmax temperature for soft spectral weights
+BSAT_ENERGY=1.0                   # energy fraction for adaptive effective rank (1.0 = use full cap R)
+BSAT_SOFT_TEMP=100.0              # softmax temperature; large value → uniform weights → hard rank-R projector
 BSAT_PROJ_STABLE=0                # 1 = float64 decomposition + relative jitter + NaN-safe
 BSAT_SPLIT_LOSSES=0               # 1 = give the BSA term its own dynamic loss weight
-BSAT_SUBSPACE_WARMUP=0            # epochs to linearly ramp BSA + coupling from 0 (0 = off)
+BSAT_SUBSPACE_WARMUP=20           # epochs to ramp BSA from 0; lets AT stabilise features before BSA engages
 
 BSAT_EXTRA_FLAGS="--bsat_align_mode ${BSAT_ALIGN_MODE} --bsat_decomp ${BSAT_DECOMP}"
 BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_energy ${BSAT_ENERGY} --bsat_soft_temp ${BSAT_SOFT_TEMP}"

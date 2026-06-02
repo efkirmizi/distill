@@ -24,8 +24,9 @@ class CoupledTensorLoss(nn.Module):
             ``soft_temp``); there is no hard 0/1 cutoff, so eigenvalue crossings
             no longer spike the gradient.
         P is exactly sign-invariant ((-u)(-u)ᵀ = u uᵀ) and continuous in feat.
-        With energy=1.0 and soft_temp→0 this recovers the original hard-rank-R
-        projector, so the v1 behaviour is a strict special case.
+        With energy=1.0 and soft_temp→∞ (large value, e.g., 100.0) this recovers
+        the original hard-rank-R projector (uniform softmax weights → P = UUᵀ),
+        so the v1 behaviour is a strict special case.
       * 'gram': eigh-free cosine similarity matrix Ĝ = M̂ M̂ᵀ ∈ [-1,1]^{B×B}
         (Similarity-Preserving). Kept for ablation; it over-constrains tiny
         students on the hardest configs, so it is not the default.
