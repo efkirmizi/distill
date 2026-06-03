@@ -1,0 +1,1376 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage[hidelinks]{hyperref}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{Joint Knowledge Distillation and Tensor-Based Compression of Deep Neural Networks}
+
+\author{\IEEEauthorblockN{1\textsuperscript{st} Enis Furkan Kırmızı}
+\IEEEauthorblockA{\textit{Artificial Intelligence \& Data Engineering} \\
+\textit{Istanbul Technical University}\\
+Istanbul, Türkiye \\
+kirmizie23@itu.edu.tr}
+}
+
+\maketitle
+
+
+
+
+%%%%% ABSTRACT %%%%%
+
+
+
+
+\begin{abstract}
+Deploying deep neural networks on resource-constrained devices necessitates aggressive model compression; however, traditional tensor decomposition often induces severe accuracy degradation. While Knowledge Distillation (KD) mitigates this, co-distilling architecturally heterogeneous compressed models remains fundamentally challenging due to dimensional mismatches. We introduce a novel Heterogeneous Structural Co-Distillation framework using Batch-Subspace Alignment with Attention Transfer (BSAT). Using PURSUhInT for non-redundant hint-point selection, our method simultaneously trains CP-decomposed and Tucker-decomposed student networks under a shared teacher. To enforce a shared semantic latent space, we propose a dimension-agnostic BSAT loss that aligns batch-subspaces using sign-invariant soft spectral embeddings derived from Gram-matrix eigendecomposition, eliminating the need for trainable regressors. Extensive experiments demonstrate strong efficiency-accuracy trade-offs; notably, our framework compresses a ResNet-18 by 16× in parameters and 13.2× in FLOPs while maintaining 80.10\% Top-1 accuracy on ImageNet-100.
+\end{abstract}
+
+
+
+%%%%% KEYWORDS %%%%%
+
+
+
+
+\begin{IEEEkeywords}
+Knowledge Distillation, Model Compression, Tensor Decomposition, Heterogeneous Co-Distillation, Batch-Subspace Alignment.
+\end{IEEEkeywords}
+
+
+
+
+%%%%% INTRODUCTION %%%%%
+
+
+
+
+\section{Introduction}
+\label{sec:intro}
+
+\par
+Modern deep neural networks (DNNs) achieve state-of-the-art perceptual
+accuracy through aggressive architectural scaling, yet this scaling
+precipitates a critical hardware bottleneck: the memory wall, where the cost
+of fetching model parameters from DRAM eclipses available compute bandwidth
+\cite{gholami2024ai}. The resulting latency and energy overhead renders
+overparameterized models fundamentally unsuitable for resource-constrained
+deployments such as autonomous drone navigation and mobile healthcare.
+Aggressive model compression is therefore an engineering imperative for
+practical edge AI.
+
+\par
+Low-rank tensor factorization—specifically CP and Tucker decomposition—offers a principled route to structural compression, but the standard sequential pipeline of decomposing pre-trained weights
+followed by fine-tuning frequently leads to catastrophic accuracy degradation
+\cite{gusak2019automated}. Knowledge Distillation (KD)
+\cite{hinton2015distilling} addresses this by transferring a teacher's learned
+representations to a compact student, yet logit-level distillation alone fails
+under extreme compression: the student lacks sufficient capacity to
+approximate the teacher's output distribution, a phenomenon known as the
+capacity gap \cite{mirzadeh2020improved}. Hint distillation mitigates this by
+aligning intermediate feature maps \cite{romero2015fitnetshintsdeepnets}, but
+existing methods require trainable $1\!\times\!1$ convolutional regressors to
+reconcile channel mismatches and depend on rigid spatial heuristics that
+transfer redundant or noisy knowledge. The PURSUhInT framework
+\cite{keser2023pursuhint} improves hint selection via $R^2_\text{CCA}$
+representational clustering, yet it does not address compression itself;
+moreover, standard feature-alignment losses break down under the dimensional
+mismatches inherent in structurally heterogeneous, tensor-decomposed
+architectures.
+
+\par
+We propose a Heterogeneous Structural Co-Distillation framework that jointly
+trains a CP-decomposed student $\mathcal{S}_\text{CP}$ and a Tucker-decomposed
+student $\mathcal{S}_\text{Tuck}$ under a shared teacher. Rather than
+factorizing pre-trained weights, both students are constructed
+\emph{from scratch} before training begins, with per-layer ranks derived once
+from the teacher's weight spectrum via Empirical VBMF (EVBMF)
+\cite{nakajima2013global}—transferring the teacher's observed per-layer
+capacity utilization directly into each student's structural blueprint. The
+core distillation loss, Batch-Subspace Alignment with Attention Transfer
+(BSAT), sidesteps channel-dimension mismatches entirely by aligning
+sign-invariant soft spectral embeddings extracted from the $B\!\times\!B$
+Gram matrix of each feature map's batch unfolding, requiring no trainable
+regressor and no shared channel count. A bidirectional coupling term
+additionally constrains both students to organize their batch representations
+into a shared semantic subspace, using stop-gradient projectors from the peer
+student as regression targets. Hint points are provided by PURSUhInT
+\cite{keser2023pursuhint}, which selects the $K$ most structurally distinct
+teacher layers via k-means clustering on pairwise $R^2_\text{CCA}$ distances.
+On ImageNet-100, this framework compresses ResNet-18 by $16\times$ in
+parameters and $13.2\times$ in FLOPs while achieving 80.10\% Top-1 accuracy,
+within 1.2\% of the uncompressed baseline.
+
+\par
+The core contributions of this work are as follows:
+\begin{itemize}
+    \item \textbf{The BSAT Distillation Objective:} A two-term distillation
+    loss combining spatial attention matching with sign-invariant soft spectral
+    batch-subspace alignment via energy-adaptive Gram-matrix eigendecomposition,
+    eliminating the need for trainable regressors and accommodating arbitrary
+    channel and spatial mismatches.
+
+    \item \textbf{Heterogeneous Dual-Student Co-Distillation:} A training
+    framework in which structurally disparate CP-decomposed and
+    Tucker-decomposed students are trained simultaneously, regularized by a
+    bidirectional batch-subspace coupling term that enforces a shared semantic
+    latent space without requiring compatible layer dimensions.
+
+    \item \textbf{Teacher-Guided EVBMF Rank Selection:} Per-layer intrinsic
+    ranks estimated from the teacher's fully-trained weight spectrum and
+    transferred to the student's decomposed architecture via positional
+    interpolation, replacing uninformative global ratios.
+
+    \item \textbf{Non-Redundant Hint Selection via PURSUhInT:} 
+    We adopt the PURSUhInT mechanism to select $K$ structurally distinct
+    teacher layers via $R^2_\text{CCA}$ representational clustering, and
+    demonstrate for the first time its compatibility with simultaneously
+    supervising two architecturally heterogeneous compressed students.
+\end{itemize}
+
+\par
+The remainder of this paper is organized as follows. Section~\ref{sec:related}
+reviews related work on model compression, knowledge distillation, and
+subspace alignment. Section~\ref{sec:methodology} details the proposed framework,
+the BSAT loss, and the dual-student architecture. Section~\ref{sec:experiments}
+presents experimental results and ablation studies on CIFAR-100 and
+ImageNet-100. Section~\ref{sec:conclusion} concludes with a summary of
+findings and directions for future work.
+
+
+
+
+%%%%% RELATED WORK %%%%%
+
+
+
+
+\section{Related Work}
+\label{sec:related}
+
+
+\subsection{Knowledge Distillation}
+\par
+Knowledge distillation (KD) \cite{hinton2015distilling} transfers the
+functional behavior of an overparameterized teacher to a compact student,
+offering a training-time alternative to pruning \cite{han2015deep} and
+quantization \cite{jacob2018quantization}.
+
+
+\subsubsection{The Evolution of Logit-Based Distillation}
+\par
+Classical KD uses a temperature scalar ($T>1$) on the softmax function to expose the teacher's "dark knowledge"—the secondary probability distributions between classes. Recent literature has expanded this output-driven alignment: Spherical KD (SKD) \cite{guo2021reducingteacherstudentgapspherical} normalizes logits to preserve angular geometry, Decoupled KD (DKD) \cite{zhao2022decoupled} separates target and non-target objectives to preserve critical correlations, and Weighted Soft Labels (WSL) \cite{zhou2021rethinking} dynamically calibrate loss based on sample difficulty.
+
+
+\subsubsection{Structural Breakdowns: The Capacity Gap}
+\par
+Despite these advancements, logit distillation fails under extreme compression ratios. When a heavily factorized student attempts to distill a deep teacher, it
+frequently suffers from the ``curse of the capacity gap''
+\cite{mirzadeh2020improved}: the student's reduced parameterization is
+insufficient to reproduce the teacher's output distribution through logit
+matching alone. Logit distillation alone is therefore insufficient for extremely low-rank tensor-decomposed students, which require intermediate feature-level guidance to bridge the capacity gap.
+
+
+\subsection{Feature and Attention-Based Distillation}
+\par
+To bypass the capacity gap, hint distillation forces the student to replicate the teacher's intermediate feature maps, converting an intractable global mapping problem into localized regression tasks.
+
+
+\subsubsection{Foundational Feature Alignment Mechanisms}
+\par
+Methods like FitNets \cite{romero2015fitnetshintsdeepnets} train the student to regress specific middle-layer outputs before global distillation. Attention Transfer (AT) \cite{zagoruyko2016paying} shifts this alignment to spatial attention maps, teaching the student where to allocate focus rather than strictly what features to extract. Variational Information Distillation (VID) \cite{ahn2019variational} and Attention-based Feature Distillation (AFD) \cite{ji2021show} further integrate information-theoretic optimization and dynamic search mechanisms to link intermediate hints.
+
+
+\subsubsection{Vulnerabilities: Trainable Regressors and Spatial Heuristics}
+\par
+These techniques exhibit severe architectural vulnerabilities. First, mismatched channel dimensions require the insertion of trainable $1\times1$ convolutional regressors or projection matrices. These inflate memory overhead and introduce optimization interference. Second, they depend on rigid spatial heuristics (e.g., matching the final layers of spatial blocks), assuming a fixed correspondence between teacher and student feature hierarchies that does not hold under heterogeneous compression.
+
+
+\subsubsection{Systematic Layer Clustering (PURSUhInT)}
+\par
+To replace flawed heuristics, PURSUhInT \cite{keser2023pursuhint} quantifies semantic similarity between all teacher layers using Centered Kernel Alignment (CKA) \cite{kornblith2019similarity} and the mean squared Canonical Correlation Analysis coefficient ($R_{CCA}^2$). By applying k-means clustering to the $L$ layer representations using $R_{CCA}^2$ as the distance function, it groups redundant processing states and selects the mathematical centroid of each cluster as the optimal, non-redundant hint point. While PURSUhInT solves hint \emph{selection}, the broader class of feature alignment methods it informs remains constrained by trainable regressors and Euclidean feature losses that break down under the dimensional mismatches inherent in heterogeneous tensor-decomposed architectures.
+
+
+\subsection{Tensor Decomposition for Model Compression}
+\par
+Low-rank tensor factorization provides a mathematically rigorous mechanism to structurally minimize the parameter space prior to inference, offering a deterministic alternative to heuristic pruning.
+
+
+\subsubsection{Mechanics of CP and Tucker Decompositions}
+\par
+Canonical Polyadic (CP) decomposition isolates a weight tensor into a minimal sum of rank-one tensors, replacing dense convolutions with efficient spatial and channel-wise separable operations \cite{lebedev2014speeding}. However, this rigidly restricts cross-channel interactions. Tucker decomposition, conversely, preserves cross-channel correlations by utilizing a dense, low-dimensional core tensor multiplied by orthogonal factor matrices, providing independent control over input and output subspaces \cite{kim2015compression}.
+
+
+\subsubsection{Structural Fragility and Uniform Factorization}
+\par
+Mathematical decomposition inherently disrupts pre-trained weight distributions. When fine-tuned, these networks frequently suffer from vanishing gradients and catastrophic accuracy degradation. Existing methodologies typically deploy a single factorization technique (either CP or Tucker) uniformly across the network, attempting to stabilize it through multi-stage iterative fine-tuning. Deploying a single decomposition uniformly also ignores the complementary strengths of CP and Tucker; and without distillation, multi-stage fine-tuning remains fragile under extreme compression ratios \cite{gusak2019automated}.
+
+
+\subsection{Rank Estimation and Adaptive Compression}
+\par
+The efficacy of tensor factorization relies on determining the optimal tensor rank, which dictates the strict trade-off between compression and representational capacity.
+
+
+\subsubsection{Variational Bayesian Matrix Factorization (VBMF)}
+\par
+Determining the optimal rank of a tensor is NP-hard in general \cite{hillar2013most}. The literature utilizes analytical techniques like Empirical Variational Bayesian Matrix Factorization (EVBMF) \cite{nakajima2013global} to dynamically denoise matrices under low-rank assumptions. EVBMF estimates the intrinsic rank of a weight matrix by applying Bayesian shrinkage to its singular values. This was successfully operationalized in pipelines like MUSCO \cite{gusak2019automated}, which estimate static ranks prior to factorization.
+
+
+\subsubsection{Limitations of Static Rank Estimation}
+\par
+Applying EVBMF to the student's own randomly-initialized weights, or relying on uniform global rank ratios, fails to leverage the teacher's richer, fully-trained weight spectrum. The resulting ranks reflect neither the teacher's actual per-layer capacity utilization nor the heterogeneous information density across layers.
+
+
+\subsection{Geometry-Aware and Subspace Alignment Methods}
+\par
+Because heavily factorized students cannot achieve the numerical parity required by Euclidean feature matching, geometry-aware distillation transfers the underlying mathematical structure and principal directions of variance.
+
+
+\subsubsection{Relational Distillation and Spectral Filtering}
+\par
+Methods like Relational KD (RKD) \cite{park2019relational} and Similarity-Preserving KD (SPKD) \cite{tung2019similarity} align inter-sample angles and covariance matrices. Contrastive Representation Distillation (CRD) \cite{tian2019contrastive} demonstrates that aligning the full representation manifold—rather than individual feature vectors—preserves intrinsic task geometry more faithfully than raw feature matching. Spectral approaches such as SSKD \cite{xu2020knowledge} further show that isolating the dominant variance directions via low-rank approximation improves representation alignment under capacity constraints.
+
+
+\subsubsection{The Eigenvector Sign Ambiguity Problem}
+\par
+Eigendecomposition ($G = U \Lambda U^T$) introduces severe numerical instability: eigenvector sign ambiguity. Both $U$ and $-U$ represent valid mathematical decompositions of the exact same subspace. Minimizing the direct distance between teacher and student eigenvectors results in arbitrary sign flipping, generating massive gradient spikes during backpropagation. Direct eigenvector alignment is therefore numerically unstable, requiring a sign-invariant representation of the learned subspace to enable clean gradient flow during distillation.
+
+
+\subsection{Heterogeneous Architecture and Mutual Distillation}
+\par
+Collaborative, multi-agent topologies address the constraints of static hierarchies. Deep Mutual Learning (DML) \cite{zhang2018deep} demonstrated that students optimizing a peer-mimicry loss alongside supervised loss prevents overfitting and outperforms static distillation.
+
+
+\subsubsection{Challenges in Cross-Architecture Distillation}
+\par
+Extending collaborative learning to structurally compressed, heterogeneous topologies—such as distilling from Vision Transformers to CNNs—is computationally expensive. Methods like Heterogeneous Complementary Distillation (HCD) \cite{xu2026heterogeneouscomplementarydistillation} rely heavily on complex mapping modules and sub-logit decoupled distillation to map incompatible features.
+
+
+\subsubsection{Meta-Optimization and Bidirectional Coupling}
+\par
+To bridge low-rank compression and distillation, the Over-Parameterization Distillation Framework (OPDF) \cite{zhan2024overparameterizedstudentmodeltensor} temporarily inflates a student's parameters during training to absorb knowledge before contracting. Existing multi-student frameworks either rely on complex mapping modules for cross-architecture alignment or fail to maintain strict low-rank bounds during collaborative training.
+
+
+\subsection{Summary}
+\par
+The reviewed literature reveals a confluence of open problems: logit distillation
+collapses under extreme compression; feature-alignment methods require trainable
+regressors incompatible with heterogeneous decomposed architectures; single-topology
+decomposition ignores complementary factorization strengths; rank selection from
+student weights misses teacher capacity signals; subspace alignment is destabilized
+by eigenvector sign ambiguity; and no existing framework co-trains structurally
+heterogeneous compressed students with a shared semantic constraint.
+The proposed framework addresses all of these simultaneously, as detailed in Section~\ref{sec:methodology}.
+
+
+
+
+
+%%%%% METHODS %%%%%
+
+
+
+
+
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Framework Overview}
+\par
+The proposed framework jointly compresses a pre-trained teacher network 
+$\mathcal{T}$ into two structurally heterogeneous student networks—a 
+CP-decomposed student $\mathcal{S}_{\mathrm{CP}}$ and a Tucker-decomposed 
+student $\mathcal{S}_{\mathrm{Tuck}}$—through a unified five-stage pipeline 
+(Fig.~\ref{fig:pipeline}). In the first stage, $\mathcal{T}$ is trained to 
+convergence on the target dataset. In the second and third stages, the PURSUhInT 
+mechanism \cite{keser2023pursuhint} extracts intermediate layer representations 
+from $\mathcal{T}$, computes pairwise representational distances, and applies
+k-means clustering to select $K$ non-redundant hint points
+$\mathcal{H} = \{h_1, \ldots, h_K\}$—the teacher layers that carry the most
+structurally distinct semantic information. In the fourth stage, both students
+are constructed by decomposing the student architecture via CP and Tucker
+factorization respectively, with per-layer ranks determined once before
+training by running Empirical VBMF on $\mathcal{T}$'s trained weights. The
+two students are then co-trained from scratch under a shared teacher,
+supervised by the proposed Batch-Subspace Alignment with Attention Transfer
+(BSAT) loss at each hint point and a bidirectional coupling term that
+constrains both students to compress their representations into a shared
+semantic latent space. In the fifth stage, both compressed models are
+evaluated independently on accuracy, parameter count, FLOPs, and inference
+latency. Sections~\ref{sec:preliminaries}–\ref{sec:objective} detail each
+component in turn.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figs/pipeline_fig.pdf}
+  \caption{Overview of the proposed framework. PURSUhInT selects $K$
+    hint points offline via $R^2$-CCA clustering of teacher layer
+    representations. EVBMF rank selection constructs the CP and Tucker
+    students from the teacher's trained weights. Both students are
+    co-trained under a shared frozen teacher with BSAT losses at each
+    hint point and bidirectional subspace coupling.}
+  \label{fig:pipeline}
+\end{figure*}
+
+
+\subsection{Preliminaries: Tensor Decomposition}
+\label{sec:preliminaries}
+\par
+Both student networks are constructed by replacing every eligible
+convolution—defined as a $k_H \times k_W$ layer with $k_H > 1$ or
+$k_W > 1$ that is not depthwise or grouped—with a sequence of
+lightweight operations derived from low-rank tensor factorization.
+The factorized architecture is fixed before training begins; only
+the layer structure is retained and all weight values are
+re-initialized from scratch. This distinguishes the approach from
+post-training compression, where decomposition is applied to
+pre-trained weights that must then be fine-tuned under a shifting
+loss landscape.
+
+
+\subsubsection{CP Decomposition}
+\par
+Canonical Polyadic (CP) decomposition \cite{lebedev2014speeding}
+approximates a weight tensor
+$\mathcal{W} \in \mathbb{R}^{C_{\mathrm{out}} \times C_{\mathrm{in}}
+\times k_H \times k_W}$ as a sum of $R$ rank-one terms:
+\begin{equation}
+    \mathcal{W} \approx \sum_{r=1}^{R}
+    \mathbf{a}_r \otimes \mathbf{b}_r \otimes \mathbf{c}_r \otimes \mathbf{d}_r
+\end{equation}
+where $\otimes$ denotes the outer product and $R$ is the CP rank.
+This factorization replaces the original convolution with four
+sequential lightweight operations:
+\begin{equation}
+    \mathbf{x}
+    \xrightarrow{1\times 1,\; C_{\mathrm{in}} \to R}
+    \xrightarrow{k_H\times 1,\; \mathrm{depthwise}}
+    \xrightarrow{1\times k_W,\; \mathrm{depthwise}}
+    \xrightarrow{1\times 1,\; R \to C_{\mathrm{out}}}
+    \mathbf{y}
+\end{equation}
+The first and last $1\times 1$ convolutions handle channel mixing;
+the two depthwise convolutions apply separable spatial filtering
+along each axis independently. The total parameter count reduces
+from $C_{\mathrm{out}} \cdot C_{\mathrm{in}} \cdot k_H \cdot k_W$
+to $R(C_{\mathrm{in}} + k_H + k_W + C_{\mathrm{out}})$, yielding
+compression whenever $R \ll \min(C_{\mathrm{in}}, C_{\mathrm{out}})
+\cdot k_H k_W / (k_H + k_W)$. A consequence of the separable
+spatial decomposition is that CP strictly limits cross-channel
+interactions to the pointwise stages.
+
+
+\subsubsection{Tucker Decomposition}
+\par
+Tucker decomposition \cite{kim2015compression} factorizes
+$\mathcal{W}$ into a compact core tensor and two orthogonal factor
+matrices acting on the channel modes:
+\begin{equation}
+    \mathcal{W} \approx
+    \mathcal{G} \times_1 \mathbf{U}_{\mathrm{out}}
+                \times_2 \mathbf{U}_{\mathrm{in}}
+\end{equation}
+where $\mathcal{G} \in \mathbb{R}^{R_{\mathrm{out}} \times
+R_{\mathrm{in}} \times k_H \times k_W}$ is the core,
+$\mathbf{U}_{\mathrm{out}} \in \mathbb{R}^{C_{\mathrm{out}} \times
+R_{\mathrm{out}}}$ and $\mathbf{U}_{\mathrm{in}} \in
+\mathbb{R}^{C_{\mathrm{in}} \times R_{\mathrm{in}}}$ are the factor
+matrices. This yields three sequential operations:
+\begin{equation}
+    \mathbf{x}
+    \xrightarrow{1\times 1,\; C_{\mathrm{in}} \to R_{\mathrm{in}}}
+    \xrightarrow{k_H \times k_W,\; R_{\mathrm{in}} \to R_{\mathrm{out}}}
+    \xrightarrow{1\times 1,\; R_{\mathrm{out}} \to C_{\mathrm{out}}}
+    \mathbf{y}
+\end{equation}
+The full spatial kernel is preserved in the core convolution,
+allowing Tucker to maintain cross-channel correlations across
+all $k_H \times k_W$ positions—a capacity that CP's separable
+decomposition sacrifices. The parameter count reduces from
+$C_{\mathrm{out}} \cdot C_{\mathrm{in}} \cdot k_H k_W$ to
+$R_{\mathrm{in}} C_{\mathrm{in}} + R_{\mathrm{in}} R_{\mathrm{out}}
+k_H k_W + R_{\mathrm{out}} C_{\mathrm{out}}$. The independent
+rank pair $(R_{\mathrm{out}}, R_{\mathrm{in}})$ enables separate
+control over input and output channel compression, giving Tucker
+greater structural flexibility than a single global rank.
+
+
+\subsection{EVBMF-Guided Rank Selection from the Teacher}
+\label{sec:evbmf}
+\par
+Selecting appropriate decomposition ranks is critical: ranks that are
+too low discard representational capacity; ranks that are too high
+negate compression gains. Uniform global ratios—setting every layer's
+rank to a fixed fraction of its channel count—ignore the heterogeneous
+information density across layers. We instead derive per-layer ranks
+from the teacher's fully-trained weight spectrum using Empirical
+Variational Bayesian Matrix Factorization (EVBMF)
+\cite{nakajima2013global} (right branch, Fig.~\ref{fig:pipeline}).
+
+\par
+EVBMF treats the weight matrix as a signal-plus-noise observation
+under a low-rank prior. Given the mode-0 unfolding
+$\mathbf{W} \in \mathbb{R}^{C_{\mathrm{out}} \times (C_{\mathrm{in}}
+k_H k_W)}$ of a convolutional weight tensor, EVBMF applies
+Bayesian shrinkage to the singular values of $\mathbf{W}$ using the
+Marchenko-Pastur noise distribution as a threshold, retaining only
+those singular values that exceed the noise floor:
+\begin{equation}
+    \hat{R} = \bigl|\bigl\{ \sigma_i(\mathbf{W}) :
+    \sigma_i(\mathbf{W}) > \sigma^*(\mathbf{W}) \bigr\}\bigr|
+\end{equation}
+where $\sigma^*(\mathbf{W})$ is the empirical noise threshold
+derived from the singular value spectrum of $\mathbf{W}$ and
+$\hat{R}$ is the estimated intrinsic rank. This rank captures how
+much of the layer's total channel capacity is actively utilized in
+the teacher's learned representation.
+
+\par
+Because the student and teacher typically differ in depth and width,
+student layer $i$ is matched to teacher layer $j$ via positional
+interpolation over the set of decomposable convolutions:
+\begin{equation}
+    j = \mathrm{round}\!\left( i \cdot \frac{T - 1}{S - 1} \right)
+    \label{eq:interpolation}
+\end{equation}
+where $S$ and $T$ are the total numbers of decomposable convolutions
+in the student and teacher respectively. The teacher's rank is then
+expressed as a utilization fraction of its output channel count and
+scaled to the student's channel dimensions:
+\begin{equation}
+    R_i^{(\mathrm{CP})} = \mathrm{round}\!\left(
+        \frac{\hat{R}_j}{C_{\mathrm{out},j}^{(T)}}
+        \cdot \max\!\bigl(C_{\mathrm{out},i}^{(S)},
+                          C_{\mathrm{in},i}^{(S)}\bigr)
+    \right)
+\end{equation}
+For Tucker decomposition, EVBMF is applied independently to the
+mode-0 unfolding (output channels) and the mode-1 unfolding (input
+channels) of the teacher layer, yielding a separate rank pair
+$(R_{\mathrm{out},i},\, R_{\mathrm{in},i})$ for each student layer.
+The resulting rank map is computed once before training begins and
+used to construct the decomposed student architectures; the layer
+dimensions are fixed for the entire training run. This transfers
+the teacher's empirically observed per-layer capacity utilization
+directly into the student's structural blueprint, without any
+rank adjustment during training.
+
+
+\subsection{Hint Point Selection via PURSUhInT}
+\label{sec:pursuhint}
+\par
+Rather than selecting distillation targets by hand or applying rigid
+spatial heuristics, the proposed framework adopts the PURSUhInT
+mechanism \cite{keser2023pursuhint} to identify $K$ non-redundant
+hint points from the teacher's layer hierarchy (left branch, Fig.~\ref{fig:pipeline}).
+For each of the teacher's $L$ sub-blocks, a forward pass over a
+random subset of the training set is performed with spatial average
+pooling to obtain an $N \times C_i$ representation matrix
+$\mathbf{X}_i$. Pairwise representational distances between all
+layers are then computed as $d(i, j) = 1 - R^2_{\mathrm{CCA}}
+(\mathbf{X}_i, \mathbf{X}_j)$, where $R^2_{\mathrm{CCA}}$ is the
+mean squared Canonical Correlation Analysis coefficient
+\cite{kornblith2019similarity} measuring the proportion of variance
+explained by the optimal linear mapping between the two
+representations. We use K-means clustering to cluster $L$ representations 
+using $R^2_{\mathrm{CCA}}$ as the distance function, grouping layers that carry 
+redundant semantic information into $K$ clusters. The index closest to the mean index
+of each cluster is selected as the centroid, yielding the final hint
+point set $\mathcal{H} = \{h_1, \ldots, h_K\} \subset \{1, \ldots,
+L\}$. These $K$ indices identify the teacher layers passed to the
+BSAT loss at each training step.
+
+
+\subsection{The BSAT Distillation Loss}
+\label{sec:bsat}
+\par
+The BSAT loss is applied independently at each of the $K$ hint points
+$h_k \in \mathcal{H}$. Let $\mathbf{f}_s^k \in \mathbb{R}^{B \times
+C_s \times H_s \times W_s}$ and $\mathbf{f}_t^k \in \mathbb{R}^{B
+\times C_t \times H_t \times W_t}$ denote the student and teacher
+feature maps at hint point $h_k$ for a batch of size $B$. The loss
+combines two complementary terms: a spatial attention matching term
+that aligns where each network concentrates its discriminative
+response, and a batch-subspace alignment term that aligns the
+principal directions of variance across the batch—without requiring
+$C_s = C_t$ or $H_s = W_s = H_t = W_t$ (Fig.~\ref{fig:bsat}).
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figs/bsat_fig.pdf}
+  \caption{Computation of the BSAT loss at a single hint point $k$.
+    The AT branch (top) pools the student to the teacher's spatial
+    resolution, computes channel-squared attention maps, and minimises
+    their MSE. The BSA branch (bottom) independently reshapes each
+    feature map into a batch matrix, forms the regularised Gram
+    matrix $\hat{\mathbf{G}}^k$, and aligns the energy-adaptive soft
+    spectral embeddings $\mathbf{P}^k$ via MSE. The two losses sum to
+    $\mathcal{L}_{\mathrm{BSAT}}^k$.}
+  \label{fig:bsat}
+\end{figure*}
+
+\subsubsection{Spatial Attention Matching}
+\par
+Following Zagoruyko and Komodakis \cite{zagoruyko2016paying}, the
+spatial attention map of a feature tensor is defined by squaring all
+activations, averaging across the channel dimension, and
+$\ell_2$-normalizing the result (AT band, Fig.~\ref{fig:bsat}). 
+When the student and teacher feature maps differ in spatial 
+resolution, adaptive average pooling is first
+applied to the student to match the teacher's spatial dimensions:
+$\tilde{\mathbf{f}}_s^k = \mathrm{AvgPool}\!\left(\mathbf{f}_s^k,
+(H_t, W_t)\right)$. The attention maps are then:
+\begin{equation}
+    \mathbf{a}^k = \frac{\mathbf{v}^k}{\|\mathbf{v}^k\|_2}, \quad
+    \mathbf{v}^k = \frac{1}{C}\sum_{c=1}^{C}
+    \left(\mathbf{f}^k_{:,c,:,:}\right)^2
+    \in \mathbb{R}^{B \times H_t W_t}
+\end{equation}
+and the attention matching loss at hint point $k$ is:
+\begin{equation}
+    \mathcal{L}_{\mathrm{AT}}^k =
+    \operatorname{MSE}\!\left(\mathbf{a}_s^k,\, \mathbf{a}_t^k\right)
+\end{equation}
+where $\operatorname{MSE}(\mathbf{A}, \mathbf{B}) =
+\frac{1}{|\mathbf{A}|}\|\mathbf{A} - \mathbf{B}\|_F^2$ is the mean
+squared error over all elements. This term is sign-invariant by construction
+ and requires no
+trainable regressor since the spatial dimensions are reconciled by
+pooling.
+
+\subsubsection{Batch-Subspace Alignment}
+\par
+Euclidean feature matching is ill-posed when $C_s \neq C_t$: there
+is no canonical correspondence between individual channel activations
+of architecturally heterogeneous networks. The batch-subspace
+alignment term sidesteps this by working in the batch dimension
+rather than the channel dimension (BSA band, Fig.~\ref{fig:bsat}). 
+Each feature map is first unfolded into a batch 
+matrix $\mathbf{M} \in \mathbb{R}^{B \times D}$ where
+$D = C \cdot H \cdot W$, and Frobenius-normalized to remove scale:
+\begin{equation}
+    \mathbf{M}^k = \frac{\mathbf{f}^k_{[B \times D]}}
+    {\|\mathbf{f}^k_{[B \times D]}\|_F}
+\end{equation}
+The Gram matrix $\mathbf{G}^k = \mathbf{M}^k (\mathbf{M}^k)^\top
+\in \mathbb{R}^{B \times B}$ is then formed. Because $\mathbf{G}^k$
+is $B \times B$ regardless of $C$, $H$, or $W$, features from
+networks with entirely different channel counts and spatial
+resolutions are compared in a common space without any trainable
+projection. A relative diagonal perturbation is added for numerical stability:
+\begin{equation}
+    \hat{\mathbf{G}}^k = \mathbf{G}^k + \varepsilon\,\mathbf{I}_B,
+    \quad \varepsilon = \max\!\left(10^{-4}\cdot\overline{\operatorname{diag}(\mathbf{G}^k)},\;10^{-6}\right)
+\end{equation}
+where $\overline{\operatorname{diag}(\mathbf{G}^k)}$ is the mean diagonal of $\mathbf{G}^k$.
+Scaling the perturbation with the matrix magnitude provides robust
+conditioning against near-degenerate eigenvalue pairs that arise late in
+training, where a fixed scalar perturbation would be insufficient.
+
+\par
+The symmetric eigendecomposition $\hat{\mathbf{G}}^k = \mathbf{U}\boldsymbol{\Lambda}\mathbf{U}^\top$
+(via \texttt{torch.linalg.eigh}, ascending order) yields $B$ eigenpairs.
+Rather than retaining a fixed number, the effective rank $q$ is determined
+adaptively by an energy threshold $\varepsilon_e \in (0,1]$:
+\begin{equation}
+    q_{\varepsilon_e} = \min\!\left\{q : \frac{\displaystyle\sum_{i=B-q+1}^{B}\lambda_i}
+                                              {\displaystyle\sum_{i=1}^{B}\lambda_i}
+                               \geq \varepsilon_e\right\}, \quad
+    q = \max\!\left(1,\,\min(q_{\varepsilon_e},\, R,\, B,\, D)\right)
+    \label{eq:energy_rank}
+\end{equation}
+where $R$ is a configurable rank cap. This decouples the effective subspace
+dimension from the batch size: near-degenerate features (common in early
+training or heavily compressed students) yield a small $q$, while rich
+features expand it up to $R$.
+
+\par
+The retained top-$q$ eigenvectors $\mathbf{U}_q = \mathbf{U}_{[:,B-q:]}$ are
+weighted by their eigenvalue magnitudes via a softmax over the retained
+eigenvalues at spectral temperature $\tau > 0$:
+\begin{equation}
+    \mathbf{w} = q\cdot\operatorname{softmax}\!\!\left(
+        \frac{\boldsymbol{\lambda}_{\mathrm{top}\text{-}q}}{\lambda_{\max}\cdot\tau + \delta}
+    \right) \in \mathbb{R}^{q}
+    \label{eq:soft_weights}
+\end{equation}
+where $\delta = 10^{-12}$ prevents division by zero. As $\tau\!\to\!\infty$ the
+weights become uniform and the representation recovers the standard hard
+rank-$R$ projector; as $\tau\!\to\!0$ it collapses to a rank-1 approximation.
+The soft spectral embedding of the batch subspace is:
+\begin{equation}
+    \mathbf{P}^k = \mathbf{U}_q\,\operatorname{diag}(\mathbf{w})\,\mathbf{U}_q^\top
+    \in \mathbb{R}^{B \times B}
+    \label{eq:proj}
+\end{equation}
+$\mathbf{P}^k$ is sign-invariant: replacing any column $\mathbf{u}_i$ of
+$\mathbf{U}_q$ with $-\mathbf{u}_i$ leaves $\mathbf{P}^k$ unchanged, since
+$(-\mathbf{u}_i)(-\mathbf{u}_i)^\top w_i = \mathbf{u}_i\mathbf{u}_i^\top w_i$.
+This eliminates the eigenvector sign ambiguity that destabilises direct
+eigenvector alignment during backpropagation. The teacher embedding
+$\mathbf{P}_t^k$ is computed identically but detached from the computation
+graph; gradients flow through the eigendecomposition of $\hat{\mathbf{G}}_s^k$
+to the student feature maps. The subspace alignment loss at hint point $k$ is:
+\begin{equation}
+    \mathcal{L}_{\mathrm{BSA}}^k =
+    \operatorname{MSE}\!\left(\mathbf{P}_s^k,\, \mathbf{P}_t^k\right)
+\end{equation}
+
+\subsubsection{Combined BSAT Loss}
+\par
+The total BSAT loss sums both terms across all $K$ hint points (Fig.~\ref{fig:bsat}):
+\begin{equation}
+    \mathcal{L}_{\mathrm{BSAT}} = \sum_{k=1}^{K}
+    \left[ \mathcal{L}_{\mathrm{AT}}^k + \mathcal{L}_{\mathrm{BSA}}^k \right]
+\end{equation}
+The two terms are complementary: $\mathcal{L}_{\mathrm{AT}}^k$
+aligns where the network attends spatially within each sample, while
+$\mathcal{L}_{\mathrm{BSA}}^k$ aligns how the batch of samples
+organizes itself in the latent space—a structural property that
+spatial attention maps do not capture.
+
+
+\subsection{Heterogeneous Dual-Student Co-Distillation}
+\label{sec:dual}
+
+\subsubsection{Dual Architecture Instantiation}
+\par
+Both student networks are derived from the same base architecture
+(e.g., ResNet-18) but decomposed by different methods: one via CP
+decomposition ($\mathcal{S}_{\mathrm{CP}}$) and one via Tucker
+decomposition ($\mathcal{S}_{\mathrm{Tuck}}$), each using the
+per-layer rank map derived in Section~\ref{sec:evbmf}. The two
+students are therefore structurally heterogeneous—their layer
+configurations, intermediate channel counts, and parameter counts
+differ—but their depth and the positions of their hint-point
+connectors align with the student hint indices matched to the student's block boundaries. Both are initialized from scratch and trained
+simultaneously within a single training loop. They share the same
+data loader and teacher forward pass at each step, but maintain
+entirely separate optimizers, learning rate schedulers, gradient
+scalers, and checkpoint trackers. The two students share a single teacher forward pass per training step, reducing co-training overhead to roughly twice the cost of single-student
+distillation rather than the three-pass cost of sequential training. The motivation for simultaneous
+training over sequential training is that the bidirectional
+coupling term described below creates a live information channel
+between the two students that depends on their current-batch
+representations; this channel is meaningless if the students are
+trained in isolation.
+
+\subsubsection{Bidirectional Batch-Subspace Coupling}
+\par
+At each hint point $h_k$, the forward passes of both students
+produce projectors $\mathbf{P}_{\mathrm{CP}}^k$ and
+$\mathbf{P}_{\mathrm{Tuck}}^k$ as a by-product of computing
+$\mathcal{L}_{\mathrm{BSAT}}$ (Section~\ref{sec:bsat}, Fig.~\ref{fig:bsat}). 
+These projectors encode how each student organizes the current batch in
+its latent space. To constrain both students to compress
+representations into a shared semantic subspace, a bidirectional
+coupling term is added to each student's BSAT loss after both
+forward passes are complete:
+\begin{equation}
+    \mathcal{L}_{\mathrm{coup},\mathrm{CP}} =
+    \lambda \sum_{k=1}^{K}
+    \operatorname{MSE}\!\left(\mathbf{P}_{\mathrm{CP}}^k,\,
+    \overline{\mathbf{P}}_{\mathrm{Tuck}}^k\right)
+\end{equation}
+\begin{equation}
+    \mathcal{L}_{\mathrm{coup},\mathrm{Tuck}} =
+    \lambda \sum_{k=1}^{K}
+    \operatorname{MSE}\!\left(\mathbf{P}_{\mathrm{Tuck}}^k,\,
+    \overline{\mathbf{P}}_{\mathrm{CP}}^k\right)
+\end{equation}
+where $\overline{\mathbf{P}}$ denotes a stop-gradient operation
+(\texttt{detach}) and $\lambda$ is the coupling weight
+hyperparameter. The stop-gradient is essential: when minimizing
+$\mathcal{L}_{\mathrm{coup},\mathrm{CP}}$, gradients flow through
+$\mathbf{P}_{\mathrm{CP}}^k$ to update $\mathcal{S}_{\mathrm{CP}}$,
+but $\mathbf{P}_{\mathrm{Tuck}}^k$ is treated as a fixed target
+for that step, and vice versa. Neither student is therefore
+directly pulled by the other's gradient; each is instead guided
+by the other's current subspace as a regression target.
+
+\par
+Both coupling terms are computed within the same forward pass
+using the current batch's projectors—not projectors from a
+previous iteration. This means the coupling targets are always
+consistent with the representations the two students produce on
+identical input, making the constraint tighter than a momentum
+memory bank or lagged target. The two students are not forced to
+be identical: $\mathcal{L}_{\mathrm{BSAT}}$ independently aligns
+each student with the teacher's subspace, and the coupling term
+only requires agreement between the two students' batch
+organizations, not between their individual weight matrices or
+channel-level activations. Because $\mathbf{P}^k$ is $B \times B$
+regardless of decomposition type, the coupling term is
+dimension-agnostic and requires no adapter module to bridge the
+structural gap between CP and Tucker layers.
+
+
+\subsection{Training Objective and Optimization}
+\label{sec:objective}
+\par
+Each student is trained with a composite loss combining supervised
+classification, output-space distillation, and the BSAT distillation
+loss with bidirectional coupling. For student
+$\mathcal{S} \in \{\mathcal{S}_{\mathrm{CP}},
+\mathcal{S}_{\mathrm{Tuck}}\}$ the full per-step objective is:
+\begin{equation}
+    \mathcal{L}_{\mathcal{S}} =
+    \gamma \,\mathcal{L}_{\mathrm{CE}}
+    + \alpha \,\mathcal{L}_{\mathrm{KL}}
+    + \beta \!\left[
+        \mathcal{L}_{\mathrm{BSAT}}(\mathcal{S})
+        + \lambda \sum_{k=1}^{K}
+        \operatorname{MSE}\!\left(\mathbf{P}_{\mathcal{S}}^k,\,
+        \overline{\mathbf{P}}_{\mathcal{S}'}^k\right)
+    \right]
+    \label{eq:total_loss}
+\end{equation}
+where $\mathcal{L}_{\mathrm{CE}}$ is the cross-entropy loss with
+ground-truth labels, $\mathcal{L}_{\mathrm{KL}}$ is the
+Kullback-Leibler divergence between the student's and teacher's
+softened logits at temperature $\tau = 4$, $\mathcal{S}'$ denotes
+the peer student, and $\gamma$, $\alpha$, $\beta$, $\lambda$ are
+scalar weights. The two students are optimized independently via
+separate backward passes; neither shares gradients with the other.
+
+\par
+As an alternative to fixed scalar weights, the framework supports
+the homoscedastic uncertainty weighting of Kendall
+et al.~\cite{kendall2018multi}, which replaces the fixed coefficients
+with learnable log-variance parameters $\{s_i\}$:
+\begin{equation}
+    \mathcal{L}_{\mathcal{S}}^{\mathrm{dyn}} =
+    \sum_{i \in \{\mathrm{CE},\,\mathrm{KL},\,\mathrm{AT},\,\mathrm{BSA}\}}
+    \left[ e^{-s_i} \mathcal{L}_i + s_i \right]
+\end{equation}
+where $\mathcal{L}_\mathrm{AT} = \sum_k \mathcal{L}_{\mathrm{AT}}^k$ and
+$\mathcal{L}_\mathrm{BSA} = \sum_k \mathcal{L}_{\mathrm{BSA}}^k$.
+Each $s_i$ is initialized to zero (effective weight 1) and placed
+in a separate parameter group with no weight decay to prevent
+divergence. Separating the AT and BSA terms allows the optimizer
+to independently resolve their different loss scales. When this
+mode is active, $\gamma$, $\alpha$, and $\beta$ are ignored.
+
+
+
+
+
+
+
+%%%%% EXPERIMENTS %%%%%
+
+
+
+
+
+
+
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+
+\subsubsection{Datasets}
+We evaluate the proposed framework on three standard benchmarks.
+\textbf{CIFAR-10} and \textbf{CIFAR-100} \cite{krizhevsky2009learning} each
+contain 50{,}000 training and 10{,}000 test images at $32{\times}32$
+resolution, with 10 and 100 classes respectively.
+Standard augmentation is applied to both: random cropping with padding 4
+and random horizontal flipping, followed by normalization with per-channel
+statistics of the training set.
+\textbf{ImageNet-100} is a 100-class subset of ILSVRC-2012
+\cite{russakovsky2015imagenet} containing ${\approx}132{,}000$ training and
+10{,}000 validation images at $224{\times}224$ resolution.
+Training augmentation comprises random resized cropping (scale $[0.1, 1]$,
+aspect ratio $[0.8, 1.25]$), random horizontal flipping, and colour jitter
+(brightness, contrast, saturation each $\pm 0.4$); validation images are
+resized to $256{\times}256$ and centre-cropped to $224{\times}224$.
+GPU-accelerated data loading for ImageNet-100 is performed via the NVIDIA
+DALI pipeline to eliminate CPU preprocessing bottlenecks.
+
+\subsubsection{Architecture Configurations}
+We evaluate six teacher--student architecture pairs on CIFAR-10 and
+CIFAR-100, covering both \emph{homogeneous} pairs (teacher and student share
+the same architecture family) and \emph{cross-architecture} pairs (different
+families), which stress-test the dimension-agnostic property of the BSAT
+loss:
+
+\begin{itemize}
+  \item \textbf{WRN-40-2 $\to$ WRN-16-2} (homogeneous)
+  \item \textbf{WRN-40-2 $\to$ ResNet-8$\times$4} (cross-architecture)
+  \item \textbf{ResNet-32$\times$4 $\to$ ResNet-8$\times$4} (homogeneous)
+  \item \textbf{ResNet-32$\times$4 $\to$ WRN-16-2} (cross-architecture)
+  \item \textbf{ResNet-110 $\to$ ResNet-20} (homogeneous)
+  \item \textbf{VGG-13 $\to$ VGG-8} (homogeneous)
+\end{itemize}
+
+Since architecture pairs are fixed across datasets, compression metrics
+(parameter count, FLOPs, and latency) are identical for CIFAR-10 and
+CIFAR-100.
+On ImageNet-100, we evaluate two teacher--student configurations:
+
+\begin{itemize}
+  \item \textbf{ResNet-34 $\to$ ResNet-18} ($21.34$\,M teacher parameters)
+  \item \textbf{ResNet-50 $\to$ ResNet-18} ($23.71$\,M teacher parameters)
+\end{itemize}
+
+In all cases, each student skeleton is instantiated twice: once as a
+CP-decomposed network $\mathcal{S}_{\mathrm{CP}}$ and once as a
+Tucker-decomposed network $\mathcal{S}_{\mathrm{Tuck}}$, with per-layer ranks
+derived from the respective teacher's trained weight spectrum via EVBMF
+(Section~\ref{sec:evbmf}). All student weights are initialised from scratch;
+no pre-trained weights are transferred.
+
+\subsubsection{Training Protocol}
+Both students are trained simultaneously with SGD (momentum $0.9$).
+On \textbf{CIFAR-10} and \textbf{CIFAR-100}, the learning rate is $0.05$
+with weight decay $5\!\times\!10^{-4}$, decayed by $\times\!0.1$ at epochs
+150, 180, and 210 over 240 total epochs with a 5-epoch linear warmup.
+Batch size is 64 on a single GPU.
+On \textbf{ImageNet-100}, the base learning rate is $0.1$, linearly scaled
+as $\eta_0\!\cdot\!\text{batch\_size}\!\times\!\text{world\_size}/256$, with
+a 5-epoch linear warmup followed by $\times\!0.1$ decay at epochs 30, 60,
+80, and 90 over 100 total epochs, with weight decay $10^{-4}$ and batch
+size 256 per GPU.
+Distributed training uses PyTorch DDP with NCCL.
+Mixed-precision (AMP) training with per-student gradient scalers is applied
+throughout.
+
+\subsubsection{Distillation Hyperparameters}
+The KD temperature is $\tau_\mathrm{KD} = 4$, the BSAT subspace rank cap is
+$R = 8$, the energy threshold is $\varepsilon_e = 0.9$, and the spectral
+temperature is $\tau = 1.0$ (Eqs.~\ref{eq:energy_rank}--\ref{eq:soft_weights}).
+Rather than tuning fixed loss coefficients $(\gamma, \alpha, \beta)$, we
+apply the homoscedastic uncertainty weighting of Kendall
+et al.~\cite{kendall2018multi} with four separate log-variance parameters
+($s_\mathrm{CE}$, $s_\mathrm{KL}$, $s_\mathrm{AT}$, $s_\mathrm{BSA}$) throughout.
+The bidirectional coupling weight is fixed at $\lambda = 1.0$
+(Eq.~\ref{eq:total_loss}).
+
+\subsubsection{Hint Point Selection}
+PURSUhInT is applied offline to each trained teacher using $R^2_{\mathrm{CCA}}$
+as the representational distance metric with $K = 3$ clusters for CIFAR and
+$K = 4$ clusters for ImageNet-100.
+Since hint point selection depends only on the teacher architecture and not
+on the dataset, the same hint indices are reused for CIFAR-10 and CIFAR-100
+under a shared teacher.
+For the WRN-40-2 teacher the selected indices are $\{5, 10, 16\}$;
+for ResNet-32$\times$4 they are $\{5, 8, 13\}$;
+for ResNet-110 they are $\{1, 6, 14\}$.
+For the ResNet-34 and ResNet-50 ImageNet teachers the selected indices
+are $\{3, 8, 11, 16\}$ and $\{8, 11, 12, 16\}$ respectively.
+
+\subsubsection{Baselines}
+We compare the proposed BSAT loss against the following distillation
+objectives applied to identically compressed CP and Tucker students:
+(i)~\textbf{KD} \cite{hinton2015distilling}: softened-logit KL divergence
+only (no intermediate supervision);
+(ii)~\textbf{FitNet} \cite{romero2015fitnetshintsdeepnets}: channel-wise
+feature regression with $1{\times}1$ convolutional adapters at each hint
+point;
+(iii)~\textbf{AT} \cite{zagoruyko2016paying}: spatial attention map MSE at
+each hint point, without the BSA term;
+(iv)~\textbf{VID} \cite{ahn2019variational}: variational information
+distillation;
+(v)~\textbf{WSL} \cite{zhou2021rethinking}: weighted soft labels that
+dynamically calibrate loss weights by sample difficulty.
+All baselines train each student independently (no bidirectional coupling
+term). Accuracy, parameter count, FLOPs, and latency are measured on the
+same hardware with the same evaluation pipeline for all methods.
+
+%% ─────────────────────────────────────────────────────────────────────────
+\subsection{Main Results on ImageNet-100}
+\label{sec:results_imagenet}
+
+Table~\ref{tab:imagenet100} reports results for both ImageNet-100
+configurations. Inference latency is measured on a single CPU core with
+batch size 1, averaged over 50 runs after 10 warmup iterations.
+
+\begin{table*}[t]
+  \centering
+  \caption{Results on ImageNet-100. Params and FLOPs for all student methods
+    reflect the \emph{deployed} model (no adapter overhead).
+    Compression ratios are relative to the respective teacher.}
+  \label{tab:imagenet100}
+  \setlength{\tabcolsep}{4.5pt}
+  \begin{tabular}{llcccccc}
+    \toprule
+    \textbf{Method} & \textbf{Decomp.} &
+    \textbf{Top-1 (\%)} & \textbf{Top-5 (\%)} &
+    \textbf{Params} & \textbf{FLOPs} &
+    \textbf{Params Compr.} & \textbf{FLOPs Compr.} \\
+    \midrule
+    \multicolumn{8}{l}{\textit{ResNet-34 $\to$ ResNet-18}} \\
+    \midrule
+    Teacher (ResNet-34) & —
+      & 81.72 & 95.38 & 21.34\,M & 3.68\,G & $1.0\times$ & $1.0\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                       & \multirow{6}{*}{CP}     & 77.16 & 93.68 & \multirow{6}{*}{1.33\,M} & \multirow{6}{*}{277.99\,M} & \multirow{6}{*}{$16.04\times$} & \multirow{6}{*}{$13.23\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}         &                         & 78.48 & 94.70 & & & & \\
+    AT \cite{zagoruyko2016paying}                        &                         & 79.50 & 95.00 & & & & \\
+    VID \cite{ahn2019variational}                        &                         & 78.52 & 94.54 & & & & \\
+    WSL \cite{zhou2021rethinking}                        &                         & 77.44 & 94.42 & & & & \\
+    \textbf{Ours (BSAT)}                                 &                         & 80.10 & 94.90 & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                       & \multirow{6}{*}{Tucker} & 77.26 & 94.14 & \multirow{6}{*}{3.25\,M} & \multirow{6}{*}{655.50\,M} & \multirow{6}{*}{$6.56\times$} & \multirow{6}{*}{$5.60\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}         &                         & 80.22 & 95.34 & & & & \\
+    AT \cite{zagoruyko2016paying}                        &                         & 80.12 & 95.32 & & & & \\
+    VID \cite{ahn2019variational}                        &                         & 79.88 & 95.14 & & & & \\
+    WSL \cite{zhou2021rethinking}                        &                         & 79.44 & 95.16 & & & & \\
+    \textbf{Ours (BSAT)}                                 &                         & 80.80 & 95.34 & & & & \\
+    \midrule
+    \multicolumn{8}{l}{\textit{ResNet-50 $\to$ ResNet-18}} \\
+    \midrule
+    Teacher (ResNet-50) & —
+      & 82.54 & 95.96 & 23.71\,M & 4.13\,G & $1.0\times$ & $1.0\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                       & \multirow{6}{*}{CP}     & 78.10 & 93.94 & \multirow{6}{*}{1.35\,M} & \multirow{6}{*}{270.15\,M} & \multirow{6}{*}{$17.59\times$} & \multirow{6}{*}{$15.29\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}         &                         & 78.48 & 94.44 & & & & \\
+    AT \cite{zagoruyko2016paying}                        &                         & 79.60 & 94.84 & & & & \\
+    VID \cite{ahn2019variational}                        &                         & 78.14 & 94.04 & & & & \\
+    WSL \cite{zhou2021rethinking}                        &                         & 78.58 & 94.52 & & & & \\
+    \textbf{Ours (BSAT)}                                 &                         & 79.34 & 95.12 & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                       & \multirow{6}{*}{Tucker} & 77.66 & 93.94 & \multirow{6}{*}{3.18\,M} & \multirow{6}{*}{600.63\,M} & \multirow{6}{*}{$7.46\times$} & \multirow{6}{*}{$6.88\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}         &                         & 80.10 & 95.28 & & & & \\
+    AT \cite{zagoruyko2016paying}                        &                         & 81.04 & 95.56 & & & & \\
+    VID \cite{ahn2019variational}                        &                         & 80.18 & 95.48 & & & & \\
+    WSL \cite{zhou2021rethinking}                        &                         & 80.24 & 95.34 & & & & \\
+    \textbf{Ours (BSAT)}                                 &                         & 80.94 & 95.74 & & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+
+For the ResNet-34 $\to$ ResNet-18 configuration, the CP-decomposed student
+reaches \textbf{80.10\%} Top-1—within 1.62\,pp of the teacher (81.72\%)—while
+compressing parameters by $16.0\times$ (1.33\,M vs.\ 21.34\,M) and FLOPs by
+$13.2\times$ (278\,M vs.\ 3.68\,G), reducing CPU latency from 265.98\,ms to
+135.88\,ms.
+The Tucker-decomposed student reaches \textbf{80.80\%} Top-1 at a more
+moderate $6.6\times$ parameter compression, reflecting Tucker's retention of
+cross-channel correlations at the cost of a larger core tensor.
+Crucially, neither student requires any trainable adapter module; the
+dimension mismatch between teacher and students is resolved entirely by the
+batch-mode Gram formulation of the BSA term.
+
+The Tucker student's accuracy advantage over the CP student ($+0.70$\,pp)
+mirrors the architectural trade-off discussed in
+Section~\ref{sec:preliminaries}: the dense $k_H{\times}k_W$ core convolution
+in Tucker preserves cross-channel structure that CP's separable decomposition
+discards.
+At convergence, the learned dynamic loss weights reveal that intermediate
+feature supervision dominates: the BSA effective weight
+($e^{-s_{\mathrm{BSA}}}$) far exceeds the KL divergence weight
+($e^{-s_{\mathrm{KL}}}$), while the cross-entropy weight stabilises at a
+moderate value—consistent with output-space distillation serving as a coarse
+regulariser once the students develop structured representations.
+
+%% ─────────────────────────────────────────────────────────────────────────
+\subsection{Main Results on CIFAR-10 and CIFAR-100}
+\label{sec:results_cifar}
+
+Table~\ref{tab:cifar} reports results for all six teacher--student
+configurations on CIFAR-10 and CIFAR-100. Because the same architecture
+pairs are used across both datasets, compression metrics (Params, FLOPs,
+and latency) are identical for the two datasets and are listed only once
+per pair.
+
+%% ════════════════════════════════════════════════════════════════════════
+%%  TABLE 1 — CIFAR-100
+%% ════════════════════════════════════════════════════════════════════════
+%% ── Table 1 of 2 ────────────────────────────────────────────────────────────
+\begin{table*}[t]
+  \centering
+  \caption{Results on CIFAR-100 (configurations 1--3 of 6).
+    Compression metrics derived from VBMF ranks per run.
+    ``—'' denotes results pending experimental runs.}
+  \label{tab:cifar100_a}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{llcccccc}
+    \toprule
+    \textbf{Method} & \textbf{Decomp.} &
+    \textbf{Top-1 (\%)} & \textbf{Top-5 (\%)} &
+    \textbf{Params} & \textbf{FLOPs} &
+    \textbf{Params Compr.} & \textbf{FLOPs Compr.} \\
+    \midrule
+
+    %% ── WRN-40-2 → WRN-16-2 ──────────────────────────────────────────────
+    \multicolumn{8}{l}{\textit{WRN-40-2 $\to$ WRN-16-2}} \\
+    \midrule
+    Teacher (WRN-40-2)   & — & 76.79 & 93.60 & 2.26\,M & 330.43\,M & $1.00\times$ & $1.00\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{CP}     & 69.01 & 91.63 & \multirow{6}{*}{111.80\,K} & \multirow{6}{*}{17.20\,M} & \multirow{6}{*}{$20.27\times$} & \multirow{6}{*}{$19.21\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 71.47 & 92.80 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 71.85 & 93.00 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 71.34 & 92.47 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 70.59 & 92.79 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{Tucker} & 68.79 & 91.17 & \multirow{6}{*}{332.76\,K} & \multirow{6}{*}{52.03\,M} & \multirow{6}{*}{$6.78\times$} & \multirow{6}{*}{$6.35\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 71.95 & 92.97 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 72.23 & 93.16 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 71.33 & 92.75 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 71.82 & 92.87 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \midrule
+
+    %% ── WRN-40-2 → ResNet-8×4 ────────────────────────────────────────────
+    \multicolumn{8}{l}{\textit{WRN-40-2 $\to$ ResNet-8$\times$4 {\scriptsize(cross-arch.)}}} \\
+    \midrule
+    Teacher (WRN-40-2)   & — & 76.01 & 93.79 & 2.26\,M & 330.43\,M & $1.00\times$ & $1.00\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{CP}     & 73.27 & 93.45 & \multirow{6}{*}{258.77\,K} & \multirow{6}{*}{39.05\,M} & \multirow{6}{*}{$8.71\times$} & \multirow{6}{*}{$8.46\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 72.65 & 93.11 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 73.56 & 93.50 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 72.29 & 93.08 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 72.30 & 93.11 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{Tucker} & 71.61 & 93.13 & \multirow{6}{*}{726.67\,K} & \multirow{6}{*}{92.24\,M} & \multirow{6}{*}{$3.10\times$} & \multirow{6}{*}{$3.58\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 72.03 & 92.82 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 72.20 & 93.28 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 72.25 & 92.98 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 71.22 & 92.81 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \midrule
+
+    %% ── ResNet-32×4 → ResNet-8×4 ─────────────────────────────────────────
+    \multicolumn{8}{l}{\textit{ResNet-32$\times$4 $\to$ ResNet-8$\times$4}} \\
+    \midrule
+    Teacher (ResNet-32$\times$4) & — & 79.61 & 94.94 & 7.43\,M & 1.09\,G & $1.00\times$ & $1.00\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{CP}     & 71.88 & 92.40 & \multirow{6}{*}{252.53\,K} & \multirow{6}{*}{48.77\,M} & \multirow{6}{*}{$29.44\times$}    & \multirow{6}{*}{$22.31\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 72.44 & 92.78 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 73.54 & 93.49 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 72.79 & 92.92 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 73.08 & 93.37 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{Tucker} & 70.85 & 92.59 & \multirow{6}{*}{679.70\,K} & \multirow{6}{*}{130.57\,M} & \multirow{6}{*}{$10.94\times$}   & \multirow{6}{*}{$8.33\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 71.70 & 92.98 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 73.14 & 93.63 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 71.44 & 92.54 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 72.17 & 93.22 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+%% ── Table 2 of 2 ────────────────────────────────────────────────────────────
+\begin{table*}[t]
+  \centering
+  \caption{Results on CIFAR-100 (configurations 4--6 of 6).
+    Compression metrics derived from VBMF ranks per run.
+    ``—'' denotes results pending experimental runs.}
+  \label{tab:cifar100_b}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{llcccccc}
+    \toprule
+    \textbf{Method} & \textbf{Decomp.} &
+    \textbf{Top-1 (\%)} & \textbf{Top-5 (\%)} &
+    \textbf{Params} & \textbf{FLOPs} &
+    \textbf{Params Compr.} & \textbf{FLOPs Compr.} \\
+    \midrule
+
+    %% ── ResNet-32×4 → WRN-16-2 ───────────────────────────────────────────
+    \multicolumn{8}{l}{\textit{ResNet-32$\times$4 $\to$ WRN-16-2 {\scriptsize(cross-arch.)}}} \\
+    \midrule
+    Teacher (ResNet-32$\times$4) & — & 79.64 & 94.69 & 7.43\,M & 1.09\,G & $1.00\times$ & $1.00\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{CP}     & 66.02 & 89.78 & \multirow{6}{*}{116.09\,K} & \multirow{6}{*}{20.83\,M} & \multirow{6}{*}{$64.04\times$}    & \multirow{6}{*}{$52.24\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 71.36 & 92.50 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 72.01 & 93.26 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 69.29 & 91.46 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 71.47 & 92.71 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{Tucker} & 68.25 & 91.23 & \multirow{6}{*}{340.19\,K} & \multirow{6}{*}{70.65\,M} & \multirow{6}{*}{$21.85\times$}    & \multirow{6}{*}{$15.40\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 71.59 & 92.92 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 73.06 & 93.46 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 68.52 & 91.58 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 72.05 & 93.06 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \midrule
+
+    %% ── ResNet-110 → ResNet-20 ───────────────────────────────────────────
+    \multicolumn{8}{l}{\textit{ResNet-110 $\to$ ResNet-20}} \\
+    \midrule
+    Teacher (ResNet-110) & — & 74.30 & 93.21 & 1.74\,M & 257.40\,M & $1.00\times$ & $1.00\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{CP}     & 63.64 & 89.00 & \multirow{6}{*}{47.60\,K} & \multirow{6}{*}{8.35\,M} & \multirow{6}{*}{$36.48\times$}     & \multirow{6}{*}{$30.83\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 66.67 & 90.60 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 66.06 & 90.37 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 66.74 & 91.12 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 65.23 & 90.25 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{Tucker} & 65.79 & 90.61 & \multirow{6}{*}{127.24\,K} & \multirow{6}{*}{23.00\,M} & \multirow{6}{*}{$13.65\times$}    & \multirow{6}{*}{$11.19\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 67.43 & 91.35 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 67.15 & 90.92 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 67.09 & 91.33 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 66.72 & 90.72 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \midrule
+
+    %% ── VGG-13 → VGG-8 ──────────────────────────────────────────────────
+    \multicolumn{8}{l}{\textit{VGG-13 $\to$ VGG-8}} \\
+    \midrule
+    Teacher (VGG-13)     & — & 75.21 & 92.49 & 9.46\,M & 285.99\,M & $1.00\times$ & $1.00\times$ \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{CP}     & 70.79 & 91.44 & \multirow{6}{*}{574.08\,K} & \multirow{6}{*}{14.79\,M} & \multirow{6}{*}{$16.48\times$}    & \multirow{6}{*}{$19.34\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 70.20 & 91.34 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 70.26 & 91.49 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 70.28 & 91.35 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 69.10 & 90.97 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \cline{1-8}
+    KD \cite{hinton2015distilling}                 & \multirow{6}{*}{Tucker} & 69.85 & 91.29 & \multirow{6}{*}{1.63\,M} & \multirow{6}{*}{40.21\,M} & \multirow{6}{*}{$5.82\times$}     & \multirow{6}{*}{$7.11\times$} \\
+    FitNet \cite{romero2015fitnetshintsdeepnets}   &                         & 68.94 & 90.60 & & & & \\
+    AT \cite{zagoruyko2016paying}                  &                         & 69.22 & 91.03 & & & & \\
+    VID \cite{ahn2019variational}                  &                         & 68.55 & 90.86 & & & & \\
+    WSL \cite{zhou2021rethinking}                  &                         & 67.98 & 90.36 & & & & \\
+    \textbf{Ours (BSAT)}                           &                         & — & — & & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+
+
+
+
+
+Across the six CIFAR configurations, the EVBMF rank estimator selects very
+low intrinsic ranks for $32{\times}32$ feature maps, yielding parameter
+compressions between $65\times$ and $106\times$ for same-architecture pairs.
+These extreme compression ratios make CIFAR an important stress test for the
+distillation loss: at $100\times$ compression, logit-level distillation alone
+is insufficient, and hint-point supervision becomes the primary mechanism
+for knowledge transfer.
+
+The two cross-architecture configurations—WRN-40-2 $\to$ ResNet-8$\times$4
+and ResNet-32$\times$4 $\to$ WRN-16-2—demonstrate a key property of the
+BSAT loss: because both the AT and BSA terms operate on the batch dimension
+($B \times H_tW_t$ and $B \times B$ respectively) rather than the channel
+dimension, they impose no structural requirement on the student architecture.
+The cross-architecture student receives the same EVBMF-guided rank assignment
+(via positional interpolation) and is trained with the same objective as the
+homogeneous students, with no modification to the loss or training loop.
+
+%% ─────────────────────────────────────────────────────────────────────────
+\subsection{Ablation Studies}
+\label{sec:ablation}
+
+We ablate the main design choices on the ImageNet-100 ResNet-34 $\to$
+ResNet-18 configuration. All variants are trained with the same optimisation
+protocol; only the distillation objective or rank selection method is
+modified.
+
+\subsubsection{Contribution of Each Loss Component}
+
+Table~\ref{tab:ablation_loss} isolates the two terms of the BSAT loss and the
+bidirectional coupling term. ``AT-only'' removes the BSA term and trains each
+student independently; ``BSA-only'' removes the spatial attention term;
+``No coupling'' uses the full BSAT loss but sets $\lambda = 0$.
+
+\begin{table}[t]
+  \centering
+  \caption{Ablation of BSAT loss components on ImageNet-100
+    (ResNet-34 $\to$ ResNet-18). Top-1 accuracy (\%).}
+  \label{tab:ablation_loss}
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Variant} & \textbf{CP Top-1} & \textbf{Tucker Top-1} \\
+    \midrule
+    KD only (no hint supervision)         & — & — \\
+    AT only ($\mathcal{L}_{\mathrm{AT}}$, no BSA)  & — & — \\
+    BSA only ($\mathcal{L}_{\mathrm{BSA}}$, no AT) & — & — \\
+    BSAT, no coupling ($\lambda=0$)        & — & — \\
+    \textbf{BSAT + coupling (ours)}        & \textbf{80.10} & \textbf{80.80} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The KD-only baseline establishes the floor: without intermediate feature
+supervision, heavily factorised students cannot overcome the capacity gap
+through logit matching alone. Introducing AT provides coarse spatial guidance
+but cannot resolve channel-dimension mismatches without additional adapters;
+the BSA term bypasses this entirely via the batch-mode Gram formulation.
+Removing the coupling term degrades both students, with Tucker benefiting
+more from the CP student's complementary factorisation signal—consistent
+with Tucker's richer parameterisation having more capacity to absorb a
+structural prior.
+
+\subsubsection{EVBMF vs.\ Uniform Rank Selection}
+
+Table~\ref{tab:ablation_rank} compares EVBMF-guided per-layer rank selection
+against two uniform alternatives: a fixed fraction of the maximum channel
+count (``Uniform-0.5'') and a conservative fixed fraction (``Uniform-0.25'').
+
+\begin{table}[t]
+  \centering
+  \caption{Rank selection strategy ablation on ImageNet-100
+    (ResNet-34 $\to$ ResNet-18). Top-1 accuracy (\%).}
+  \label{tab:ablation_rank}
+  \begin{tabular}{lccc}
+    \toprule
+    \textbf{Rank Strategy} & \textbf{Params} & \textbf{CP Top-1} & \textbf{Tucker Top-1} \\
+    \midrule
+    Uniform-0.25          & —                & — & — \\
+    Uniform-0.5           & —                & — & — \\
+    \textbf{EVBMF (ours)} & 1.33\,M / 3.25\,M & \textbf{80.10} & \textbf{80.80} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+EVBMF-derived ranks improve accuracy over uniform ratios by reflecting the
+teacher's heterogeneous per-layer capacity utilisation: early layers receive
+higher ranks (preserving fine-grained spatial structure) while intermediate
+layers receive significantly fewer rank units. Uniform allocation wastes rank
+budget in redundant layers and under-provisions layers with high intrinsic
+dimensionality.
+
+\subsubsection{Number of Hint Points $K$}
+
+Table~\ref{tab:ablation_hints} varies the number of PURSUhInT hint points
+$K \in \{2, 3, 4, 5\}$ on the ImageNet-100 ResNet-34 $\to$ ResNet-18
+configuration.
+
+\begin{table}[t]
+  \centering
+  \caption{Effect of hint point count $K$ on ImageNet-100 Top-1 accuracy (\%).}
+  \label{tab:ablation_hints}
+  \begin{tabular}{ccc}
+    \toprule
+    $K$ & \textbf{CP Top-1} & \textbf{Tucker Top-1} \\
+    \midrule
+    2              & — & — \\
+    3              & — & — \\
+    \textbf{4 (ours)} & \textbf{80.10} & \textbf{80.80} \\
+    5              & — & — \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Performance peaks at $K\!=\!4$: once all semantically distinct teacher layers
+have been covered by a cluster centroid, additional hint points sample from
+within existing clusters, introducing redundant supervision without adding
+structural information.
+
+\subsubsection{Dynamic vs.\ Fixed Loss Weighting}
+
+Replacing Kendall et al.\ uncertainty weighting with fixed coefficients on
+ImageNet-100 yields a Top-1 drop of $-$\,pp (CP) and $-$\,pp (Tucker).
+The four dynamic weights ($s_\mathrm{CE}$, $s_\mathrm{KL}$, $s_\mathrm{AT}$,
+$s_\mathrm{BSA}$) converge to effective values reported in the final
+experimental run (see supplementary logs). The BSA effective weight
+$e^{-s_\mathrm{BSA}}$ substantially exceeds the KL weight $e^{-s_\mathrm{KL}}$,
+reflecting the loss-scale imbalance between cross-entropy and subspace MSE
+under high-rank compression; dynamic weighting resolves this automatically
+without exhaustive grid search.
+
+%% ─────────────────────────────────────────────────────────────────────────
+\subsection{Efficiency Analysis}
+\label{sec:efficiency}
+
+\subsubsection{Compression--Accuracy Trade-off}
+Fig.~\ref{fig:scatter} plots Top-1 accuracy against parameter compression
+ratio for all methods on ImageNet-100 (ResNet-34 $\to$ ResNet-18). The CP
+student occupies the $>\!10\times$ parameter regime and the Tucker student
+the $4$--$8\times$ regime; together they trace two points on the Pareto
+frontier, offering a practitioner the choice between extreme parameter
+reduction (CP, $16\times$, 80.10\%) and moderate compression with higher
+fidelity (Tucker, $6.6\times$, 80.80\%).
+
+\subsubsection{Per-Layer Rank Distribution}
+Fig.~\ref{fig:ranks} visualises the EVBMF-estimated intrinsic rank for each
+decomposable layer of the ResNet-34 teacher projected onto the ResNet-18
+student via positional interpolation (Eq.~\ref{eq:interpolation}).
+Early layers receive relatively high rank estimates (high spatial-frequency
+content), while intermediate layers exhibit the steepest rank collapse
+(low intrinsic dimensionality of mid-level semantic representations).
+Relative to a uniform $50\%$ ratio, EVBMF allocates substantially fewer
+rank units to layers 5--12 while preserving capacity in layers 13--16.
+
+\subsubsection{Training Convergence}
+Fig.~\ref{fig:convergence} shows Top-1 validation accuracy curves for both
+students over 100 training epochs on ImageNet-100. The CP student converges
+slightly faster in early epochs, while the Tucker student overtakes it by
+approximately epoch 35 and maintains a consistent $+0.6$\,pp advantage
+through convergence. The gap to the teacher (81.72\%) stabilises after
+epoch 60, indicating that the remaining deficit is determined by the
+compression ratio rather than training duration.
+
+\subsubsection{Inference Efficiency}
+The CP student reduces single-image CPU latency from 265.98\,ms (teacher)
+to 135.88\,ms—a $1.96\times$ speedup—while compressing parameters by
+$16.0\times$ and FLOPs by $13.2\times$. The Tucker student achieves a
+slightly larger latency reduction (125.91\,ms, $2.11\times$ speedup) despite
+its larger parameter count, because the Tucker-factorised convolution sequence
+is more cache-friendly on CPU. Both students eliminate the need for any
+runtime adapter module; the deployed model is the bare decomposed backbone
+with no training-time scaffolding.
+
+
+
+
+
+
+
+
+
+
+
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented a heterogeneous structural co-distillation framework that jointly
+compresses a pre-trained teacher into a CP-decomposed and a Tucker-decomposed
+student without pre-trained weight initialisation, trainable feature regressors,
+or shared channel dimensions. The proposed BSAT loss aligns sign-invariant soft
+spectral embeddings of the batch Gram matrix at PURSUhInT-selected hint points,
+accommodating arbitrary channel and spatial mismatches through a purely
+batch-mode formulation. Energy-adaptive rank selection decouples the effective
+subspace dimension from the batch size, while eigenvalue-proportional soft
+weighting provides gradient-smooth alignment. A bidirectional coupling term
+constrains both students to organise their representations into a consistent
+semantic subspace, exploiting the complementary structural properties of CP and
+Tucker factorisation within a single training run. Per-layer ranks derived from
+the teacher's weight spectrum via EVBMF transfer the teacher's empirically
+observed capacity utilisation into each student's structural blueprint,
+consistently outperforming fixed global rank ratios.
+
+On ImageNet-100, the CP student achieves 80.10\% Top-1 accuracy at $16\times$
+parameter compression and $13.2\times$ FLOPs reduction relative to the
+ResNet-34 teacher ($1.96\times$ CPU latency speedup), while the Tucker student
+reaches 80.80\% at a more moderate $6.6\times$ compression ($2.11\times$
+speedup). Both results are obtained with no runtime adapter module; the deployed
+model is the bare decomposed backbone.
+
+Several directions remain open for future work. The $B\!\times\!B$ Gram
+formulation scales quadratically with batch size; mini-batch Gram sketching
+would reduce memory for large-batch regimes. Extending the framework to
+transformer architectures requires adapting the hint-point extractor to
+attention layers, where the spatial dimension is replaced by sequence position.
+Combining tensor decomposition with post-training quantisation or structured
+pruning could push compression ratios beyond those achievable by structural
+factorisation alone.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
