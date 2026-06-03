@@ -67,12 +67,14 @@ BSAT_SOFT_TEMP=1.0                # softmax temperature; 1.0 → eigenvalue-prop
 BSAT_PROJ_STABLE=1                # float64 decomp + relative diagonal jitter prevents near-degenerate eigenvalues
 BSAT_SPLIT_LOSSES=1               # 1 = give the BSA term its own dynamic loss weight
 BSAT_SUBSPACE_WARMUP=20           # epochs to ramp BSA from 0; lets AT stabilise features before BSA engages
+BSAT_DISABLE_BSA=0                # 1 = run AT+KD only, no BSA (diagnostic / ablation)
 
 BSAT_EXTRA_FLAGS="--bsat_align_mode ${BSAT_ALIGN_MODE} --bsat_decomp ${BSAT_DECOMP}"
 BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_energy ${BSAT_ENERGY} --bsat_soft_temp ${BSAT_SOFT_TEMP}"
 BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_subspace_warmup ${BSAT_SUBSPACE_WARMUP}"
 if [ "$BSAT_PROJ_STABLE" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_proj_stable"; fi
 if [ "$BSAT_SPLIT_LOSSES" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_split_losses"; fi
+if [ "$BSAT_DISABLE_BSA" -eq 1 ]; then BSAT_EXTRA_FLAGS="${BSAT_EXTRA_FLAGS} --bsat_disable_bsa"; fi
 
 # VBMF automatic rank selection (uses teacher weight spectrum; recommended over fixed ratios)
 USE_VBMF=1
