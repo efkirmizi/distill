@@ -1,0 +1,376 @@
+%==============================================================================
+%  GRADUATION PROJECT POSTER  ·  A1 portrait  ·  beamerposter
+%  "Joint Knowledge Distillation and Tensor-Based Compression of DNNs"
+%  Enis Furkan Kirmizi  ·  Istanbul Technical University  ·  2026
+%
+%  COMPILE:  pdfLaTeX  (Overleaf: Menu -> Compiler -> pdfLaTeX)
+%  Run TWO passes (the bottom band uses a positioned overlay).
+%==============================================================================
+\documentclass[final]{beamer}
+
+% ---- Canvas: A1 portrait. 'scale' multiplies the BODY font sizes only -------
+%  (title/footer use absolute \fontsize, so they stay large regardless.)
+\usepackage[size=a1,scale=1.06,orientation=portrait]{beamerposter}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[scaled]{helvet}            % clean sans-serif body
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins}
+\usepackage{ragged2e}                  % \justifying
+\usepackage{qrcode}                    % inline QR code generation
+
+% ---- ITU palette ----------------------------------------------------------
+\definecolor{itublue}{HTML}{1E5C9B}    % ITU primary blue
+\definecolor{itudark}{HTML}{143F6B}    % darker shade for accents
+\definecolor{itulight}{HTML}{EAF1F9}   % pale blue tint
+\definecolor{accent}{HTML}{E08A1E}     % warm accent (matches Tucker amber)
+
+% ---- Full-bleed helper: half of the (paper - text) side margin ------------
+\newlength{\bleedmargin}
+\setlength{\bleedmargin}{\dimexpr(\paperwidth-\textwidth)/2\relax}
+
+% ---- Strip beamer chrome; we draw everything in the frame body ------------
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{headline}{}
+\setbeamertemplate{footline}{}
+\setbeamertemplate{frametitle}{}
+\setbeamercolor{background canvas}{bg=white}
+
+% ---- Bullet styling -------------------------------------------------------
+\setbeamertemplate{itemize items}[square]
+\setbeamercolor{itemize item}{fg=itublue}
+\setbeamercolor{itemize subitem}{fg=accent}
+\setlength{\leftmargini}{1.4em}
+
+% ---- Reusable content block ----------------------------------------------
+\newtcolorbox{pblock}[1]{%
+  enhanced,
+  colback=white, colframe=itublue, boxrule=1.2pt, arc=3.5mm,
+  coltitle=white, colbacktitle=itublue, fonttitle=\bfseries\large,
+  title={#1},
+  left=5mm, right=5mm, top=3.5mm, bottom=3.5mm,
+  toptitle=2mm, bottomtitle=2mm,
+}
+
+% ---- Small method sub-card (used inside "How it works") -------------------
+\newtcolorbox{minicard}{%
+  enhanced, colback=itulight, colframe=itublue!55, boxrule=0.8pt, arc=2.5mm,
+  left=3.5mm, right=3.5mm, top=2mm, bottom=2mm,
+  before skip=2.5mm, after skip=2.5mm,
+}
+
+\newcommand{\cardtitle}[1]{{\bfseries\color{itudark} #1}\par\vspace{0.6mm}}
+\newcommand{\Kirmizi}{K\i rm\i z\i}
+
+\begin{document}
+\begin{frame}[t]{}
+
+%==============================================================================
+%  TITLE BAND  ·  full-bleed: flush to the top, left and right page edges
+%==============================================================================
+\vspace*{-\dimexpr\fboxsep+2pt\relax} % pull flush to the very top edge
+\begin{tcolorbox}[enhanced, colback=itublue, colframe=itublue, boxrule=0pt,
+  sharp corners, before skip=0pt, after skip=0pt,
+  grow to left by=\bleedmargin, grow to right by=\bleedmargin,
+  left=10mm, right=10mm, top=10mm, bottom=10mm]
+\begin{columns}[c,onlytextwidth]
+  \begin{column}{0.76\textwidth}
+    \centering
+    {\color{white}\bfseries\fontsize{54}{60}\selectfont
+      Joint Knowledge Distillation and Tensor-Based\\[3mm]
+      Compression of Deep Neural Networks\par}
+    \vspace{6mm}
+    {\color{white}\fontsize{32}{36}\selectfont
+      Enis Furkan \Kirmizi\quad 150230740
+      \;\;{\color{itulight}\fontsize{24}{28}\selectfont $\cdot$\;\;
+      Supervisor: Prof.\ Dr.\ Beh\c{c}et U\u{g}ur T\"oreyin}\par}
+  \end{column}
+  \begin{column}{0.18\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/itu_mark_white.png}
+  \end{column}
+\end{columns}
+\end{tcolorbox}
+
+\vspace{7mm}
+
+%==============================================================================
+%  THREE-COLUMN BODY
+%==============================================================================
+\begin{columns}[t,onlytextwidth]
+
+%================================================================== COLUMN 1
+\begin{column}{0.295\textwidth}
+\justifying
+
+\begin{pblock}{1 \;\; Introduction}
+Deep neural networks --- ResNet, WideResNet, VGG --- deliver high accuracy but
+carry millions of parameters and billions of FLOPs per inference, far exceeding
+the memory and power budgets of edge platforms such as autonomous drones, IoT
+sensors and medical devices. This bottleneck is the \emph{memory wall} [1]:
+fetching model parameters from DRAM eclipses available compute, making
+aggressive compression an engineering imperative for practical edge AI.
+
+Two compression families exist yet each fails in isolation.
+\textbf{Tensor decomposition} (CP\,[2], Tucker\,[3]) reduces structural size but
+causes vanishing gradients and accuracy collapse in the sequential
+\emph{decompose-then-fine-tune} pipeline.
+\textbf{Knowledge distillation} [5] guides a compact student with a teacher's
+soft outputs but collapses at high compression ratios due to the
+\emph{capacity gap} [6] and becomes structurally ill-defined once the
+student's layers are tensor-factorized.
+\end{pblock}
+
+\vspace{5mm}
+
+\begin{pblock}{2 \;\; Problem Definition}
+Given a pre-trained teacher $\mathcal{T}$ and labelled dataset $\mathcal{D}$,
+jointly construct and train two compressed students $S_{CP}$, $S_{Tuck}$ from
+scratch to minimise the combined distillation loss:
+\[\mathcal{L} \;=\!\!\sum_{i\in\{CE,\,KL,\,AT\}}\!\!\big(e^{-s_i}\mathcal{L}_i+s_i\big)\]
+subject to:
+\begin{itemize}
+  \item Per-layer ranks $\{r_i\}$ derived by \textbf{EVBMF} on $\mathcal{T}$'s
+        weight spectrum --- automatic, layer-adaptive, no manual tuning.
+  \item Hint points $\mathcal{H}\!=\!\{h_1,\dots,h_K\}$ selected by
+        \textbf{PURSUhInT} clustering of $\mathcal{T}$'s layer representations.
+  \item Log-variance weights $s_i$ learned online (Kendall uncertainty) ---
+        zero hand-tuned loss coefficients.
+\end{itemize}
+\end{pblock}
+
+\vspace{5mm}
+
+\begin{pblock}{3 \;\; Contributions}
+\begin{itemize}
+  \item \textbf{Joint, from-scratch} construction \& co-training of CP- and
+        Tucker-decomposed students under one shared teacher --- replacing the
+        fragile decompose-then-fine-tune pipeline.
+  \item \textbf{PURSUhInT} clustering integrated into compressed-student
+        training to pick non-redundant, semantic hint points.
+  \item \textbf{EVBMF} teacher-guided per-layer ranks --- automatic, calibrated
+        to the teacher's own weight spectrum.
+  \item \textbf{Systematic study}: 8 teacher--student pairs, 2 datasets,
+        5 distillation objectives, one identical pipeline.
+\end{itemize}
+\end{pblock}
+
+\vspace{5mm}
+
+\begin{pblock}{4 \;\; Automatic per-layer ranks (EVBMF)}
+EVBMF reads the teacher's \textbf{trained weight spectrum} to set each layer's
+rank --- no global ratio, no validation search.
+\[ \hat{R} = \big|\,\sigma_i(\mathcal{W}) : \sigma_i(\mathcal{W}) > \sigma^*(\mathcal{W})\,\big| \]
+\vspace{-3mm}
+\begin{center}
+\includegraphics[width=0.99\linewidth]{figures/fig5_ranks.png}
+\end{center}
+{\small Markedly non-uniform: early layers keep $\sim$59\% of channels, deep
+layers fall to 36--44\%. Tucker estimates input/output ranks
+\emph{independently} per stage (Marchenko--Pastur threshold).}
+\end{pblock}
+
+\end{column}
+\hfill
+%================================================================== COLUMN 2
+\begin{column}{0.39\textwidth}
+\justifying
+
+\begin{pblock}{5 \;\; Proposed Framework}
+A single joint optimization replaces the sequential pipeline: two compressed
+students are \textbf{built from scratch} and \textbf{co-trained} under one
+\textbf{frozen} teacher, then evaluated independently.
+\begin{center}
+\includegraphics[width=\linewidth]{figures/fig1_pipeline.png}
+\end{center}
+\vspace{0.5mm}
+{\small \textbf{\color{itudark}One shared teacher forward pass} supervises both
+students each step --- roughly \textbf{twice} the cost of a single distillation,
+not three times.}
+\end{pblock}
+
+\vspace{5mm}
+
+\begin{pblock}{6 \;\; How it works}
+
+\begin{minicard}
+\cardtitle{PURSUhInT \;\textbar\; \emph{where} to supervise}
+Cluster teacher layers by representational similarity; each cluster centroid is
+a non-redundant hint point ($K{=}3$ CIFAR, $K{=}4$ ImageNet).
+\[ d(i,j) \;=\; 1 - R^{2}_{\mathrm{CCA}}(X_i, X_j) \;\xrightarrow{\;k\text{-means}\;}\; \mathcal{H}=\{h_1,\dots,h_K\} \]
+\end{minicard}
+
+\begin{minicard}
+\cardtitle{Heterogeneous students \;\textbar\; \emph{what} to build}
+Same base net, factorized two ways from the EVBMF rank map:
+\\[2mm]
+\textbf{CP} (4 ops): $1{\times}1 \!\to\! \mathrm{dw}\,k_H \!\to\! \mathrm{dw}\,k_W \!\to\! 1{\times}1$;\;
+params $\to R(C_{in}{+}k_H{+}k_W{+}C_{out})$. Highest compression.
+\\[2mm]
+\textbf{Tucker} (3 ops): $1{\times}1 \!\to\! k_H{\times}k_W \text{ core} \!\to\! 1{\times}1$;
+dense core keeps cross-channel correlations $\Rightarrow$ higher accuracy
+\emph{and} lower latency.
+\end{minicard}
+
+\begin{minicard}
+\cardtitle{Distillation + auto-balancing \;\textbar\; \emph{how} to train}
+KD\,$+$\,attention transfer at the hint points:
+\[ \mathcal{L}_{\mathrm{KL}}=\mathrm{KL}\!\big(\sigma(z_t/\tau)\,\|\,\sigma(z_s/\tau)\big),\;\;
+   \mathcal{L}_{\mathrm{AT}}=\!\sum_k \mathrm{MSE}(a_s^k,a_t^k) \]
+Homoscedastic (Kendall) uncertainty weighting --- \textbf{no} hand-tuned coefficients:
+\[ \mathcal{L} \;=\!\! \sum_{i\in\{\mathrm{CE,\,KL,\,AT}\}}\!\! \big(e^{-s_i}\,\mathcal{L}_i + s_i\big) \]
+\end{minicard}
+
+\begin{center}
+\includegraphics[width=0.96\linewidth]{figures/fig8_lossweights.png}
+\end{center}
+{\small Weights span \textbf{3 orders of magnitude} yet equalize the three
+gradient contributions to within 10\% (CE\,0.90, KL\,1.00, AT\,0.91).}
+\end{pblock}
+
+\end{column}
+\hfill
+%================================================================== COLUMN 3
+\begin{column}{0.295\textwidth}
+\justifying
+
+\begin{pblock}{7 \;\; Key Results}
+\textbf{8 teacher--student pairs} on CIFAR-100 \& ImageNet-100, each under
+\textbf{5 distillation objectives} in one identical pipeline.
+\begin{center}
+\includegraphics[width=0.99\linewidth]{figures/fig3_pareto.png}
+\end{center}
+\centering
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}l c c c@{}}
+\toprule
+\textbf{Teacher\,$\to$\,Student} & \textbf{Dec.} & \textbf{Compr.} & \textbf{Top-1}\\
+\midrule
+\multicolumn{4}{@{}l}{\itshape ImageNet-100}\\
+ResNet-34\,$\to$\,18 & Tucker & 6.56$\times$ & 80.12\\
+                     & CP     & 16.04$\times$ & 79.50\\
+ResNet-50\,$\to$\,18 & Tucker & 7.46$\times$ & \textbf{81.04}\\
+                     & CP     & 17.59$\times$ & 79.60\\
+\multicolumn{4}{@{}l}{\itshape CIFAR-100}\\
+ResNet-32$\times$4$\to$WRN-16-2 & CP & \textbf{64.04$\times$} & 72.01\\
+WRN-40-2\,$\to$\,WRN-16-2 & Tucker & 6.78$\times$ & 72.23\\
+\bottomrule
+\end{tabular}}
+
+\vspace{2mm}
+{\small\justifying \textbf{\color{itudark}Attention transfer} is best in
+\textbf{10 of 16} columns; feature-based supervision beats logit-only KD in
+\emph{every} ImageNet config.}
+\end{pblock}
+
+\vspace{5mm}
+
+\begin{pblock}{8 \;\; Efficiency \& CP--Tucker trade-off}
+The two students form a \textbf{consistent trade-off} --- the ordering never reverses.
+\begin{center}
+\renewcommand{\arraystretch}{1.2}
+{\small
+\begin{tabular}{@{}l c c@{}}
+\toprule
+ & \textbf{CP} & \textbf{Tucker}\\
+\midrule
+Compression  & up to \textbf{64$\times$} & 6--22$\times$\\
+Accuracy     & lower & higher\\
+CPU latency  & 1.96$\times$ & \textbf{2.11$\times$}\\
+\bottomrule
+\end{tabular}}
+\end{center}
+{\small Single-image CPU latency $265.98 \to 135.88$\,ms (CP) $\to
+\mathbf{125.91}$\,ms (Tucker). Tucker is faster \emph{despite} 2.4$\times$ more
+params --- a 3-op vs 4-op kernel chain.}
+\begin{center}
+\includegraphics[width=0.96\linewidth]{figures/fig7_convergence.png}
+\end{center}
+\end{pblock}
+
+\vspace{5mm}
+
+\begin{pblock}{9 \;\; Conclusions}
+\begin{itemize}
+  \item Joint compression\,+\,distillation \textbf{beats sequential pipelines}
+        at every ratio tested --- Tucker within \textbf{1.6\,pp} of the teacher
+        on ImageNet-100; both students within \textbf{3--5\,pp} on
+        moderate-compression CIFAR-100 pairs.
+  \item EVBMF\,+\,PURSUhInT\,+\,Kendall $\Rightarrow$ \textbf{zero tuned
+        hyperparameters}.
+  \item \textbf{Tucker} for accuracy \& lowest latency; \textbf{CP} for the
+        tightest budget.
+  \item Architecture-agnostic; complies with \mbox{ISO/IEC 23053:2022} \&
+        \mbox{TS 4213:2022}.
+\end{itemize}
+{\small\color{itudark}\textbf{Future:} vision transformers $\cdot$ full
+ImageNet-1k $\cdot$ post-training quantization $\cdot$ on-device energy.}
+\end{pblock}
+
+\vspace{5mm}
+
+\begin{pblock}{References}
+\begin{minipage}[c]{0.56\linewidth}
+  {\small\setlength{\parskip}{1.5mm}
+  Please see the full reference list, notation details, additional experiments,
+  and further explanation via the QR code.\par
+  \vspace{3mm}
+  \textbf{\color{itudark}Source code \& report:}\\
+  \texttt{\small github.com/efkirmizi/distill}}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.38\linewidth}
+  \centering
+  \qrcode[height=3.4cm]{https://github.com/efkirmizi/distill}
+\end{minipage}
+\end{pblock}
+
+\end{column}
+\end{columns}
+
+\vfill
+
+%==============================================================================
+%  FOOTER  ·  full-bleed ITU institutional band, flush to the page bottom edge
+%  NOTE: needs TWO pdflatex passes so the overlay position settles.
+%==============================================================================
+\begin{tikzpicture}[remember picture, overlay]
+\node[anchor=south, inner sep=0pt] at (current page.south) {%
+\begin{tcolorbox}[width=\paperwidth, enhanced, colback=itublue, colframe=itublue,
+  boxrule=0pt, sharp corners, left=12mm, right=12mm, top=8mm, bottom=8mm]
+
+\begin{minipage}[c]{0.19\linewidth}
+  \centering
+  \includegraphics[height=4.6cm]{figures/itu_mark_white.png}
+\end{minipage}\hfill
+%
+\begin{minipage}[c]{0.45\linewidth}
+  {\color{white}\fontsize{42}{48}\selectfont\bfseries ISTANBUL TECHNICAL UNIVERSITY}\\[4mm]
+  {\color{white}\fontsize{27}{33}\selectfont Department of Artificial Intelligence \& Data Engineering}
+\end{minipage}\hfill
+%
+\begin{minipage}[c]{0.02\linewidth}
+  \centering
+  \tikz\draw[white, line width=1.8pt, dash pattern=on 0.4pt off 7pt,
+    line cap=round] (0,-2.0) -- (0,2.0);
+\end{minipage}\hfill
+%
+\begin{minipage}[c]{0.30\linewidth}
+  {\color{white}\fontsize{23}{30}\selectfont
+   Faculty of Computer and Informatics\\
+   \.{I}T\"U Ayaza\u{g}a Campus, 34469, Maslak/\.{I}stanbul\\
+   bbf@itu.edu.tr\\
+   https://yapayzeka.itu.edu.tr\par}
+\end{minipage}%
+
+\end{tcolorbox}};
+\end{tikzpicture}
+
+\end{frame}
+\end{document}
