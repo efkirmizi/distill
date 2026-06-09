@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Joint Knowledge Distillation &amp; Tensor-Based Compression of DNNs — ITU Graduation Project</title>
+<meta name="description" content="A unified framework that jointly compresses and distills deep neural networks from scratch — near-teacher accuracy at up to 64× compression. ITU graduation project by Enis Furkan Kırmızı.">
+<meta name="author" content="Enis Furkan Kırmızı">
+<meta property="og:title" content="Joint Knowledge Distillation &amp; Tensor-Based Compression of DNNs">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231E5C9B'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round'%3E%3Ccircle cx='18' cy='20' r='4'/%3E%3Ccircle cx='18' cy='44' r='4'/%3E%3Ccircle cx='46' cy='32' r='4'/%3E%3Cpath d='M22 20 L42 31 M22 44 L42 33'/%3E%3C/g%3E%3C/svg%3E">
+
+<style>
+:root{
+  --blue:#1E5C9B;--dark:#143F6B;--darker:#0d2c4d;--light:#EAF1F9;
+  --accent:#E08A1E;--accent-soft:#fbe9d1;--ink:#1c2733;--muted:#5c6b7a;
+  --line:#e3e9f0;--bg:#ffffff;--bg-alt:#f5f8fc;--green:#2e9e6b;
+  --radius:16px;
+  --shadow-sm:0 2px 8px rgba(20,63,107,.06);
+  --shadow:0 10px 30px rgba(20,63,107,.10);
+  --shadow-lg:0 20px 50px rgba(20,63,107,.16);
+  --maxw:1120px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+body{font-family:var(--font);color:var(--ink);background:var(--bg);line-height:1.65;-webkit-font-smoothing:antialiased}
+a{color:var(--blue);text-decoration:none}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.01em}
+section{padding:88px 0}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+.eyebrow{display:inline-block;font-size:.78rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+.section-title{font-size:clamp(1.7rem,3.4vw,2.5rem);font-weight:800;color:var(--dark);margin-bottom:14px}
+.section-lead{font-size:1.08rem;color:var(--muted);max-width:680px;margin-bottom:46px}
+.bg-alt{background:var(--bg-alt)}
+
+/* NAV */
+nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.82);backdrop-filter:saturate(180%) blur(12px);-webkit-backdrop-filter:saturate(180%) blur(12px);border-bottom:1px solid transparent;transition:border-color .3s,box-shadow .3s}
+nav.scrolled{border-color:var(--line);box-shadow:var(--shadow-sm)}
+.nav-inner{max-width:var(--maxw);margin:0 auto;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.brand{display:flex;align-items:center;gap:11px;font-weight:800;color:var(--dark);font-size:1rem}
+.brand .mark{width:34px;height:34px;border-radius:9px;background:var(--blue);display:grid;place-items:center;flex:none}
+.brand .mark svg{width:20px;height:20px}
+.nav-links{display:flex;gap:6px;align-items:center}
+.nav-links a{color:var(--muted);font-weight:600;font-size:.88rem;padding:7px 11px;border-radius:9px;transition:color .2s,background .2s;white-space:nowrap}
+.nav-links a:hover{color:var(--dark);background:var(--light)}
+.nav-toggle{display:none;background:none;border:0;cursor:pointer;padding:8px}
+.nav-toggle span{display:block;width:24px;height:2px;background:var(--dark);margin:5px 0;border-radius:2px;transition:.3s}
+
+/* HERO */
+header.hero{position:relative;overflow:hidden;color:#fff;background:linear-gradient(150deg,var(--darker) 0%,var(--blue) 60%,#2a72b8 100%);padding:96px 0 108px}
+.hero::before{content:"";position:absolute;inset:0;opacity:.5;background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.14) 1.4px,transparent 0);background-size:30px 30px;-webkit-mask-image:linear-gradient(180deg,#000 0%,transparent 85%);mask-image:linear-gradient(180deg,#000 0%,transparent 85%)}
+.hero::after{content:"";position:absolute;right:-160px;top:-160px;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(224,138,30,.35),transparent 62%);filter:blur(8px)}
+.hero .wrap{position:relative;z-index:2}
+.hero .tag{display:inline-flex;align-items:center;gap:9px;font-size:.8rem;font-weight:600;letter-spacing:.04em;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);padding:7px 15px;border-radius:999px;margin-bottom:26px}
+.hero .tag .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(224,138,30,.25)}
+.hero h1{font-size:clamp(2.1rem,5.4vw,3.7rem);font-weight:800;max-width:17ch;margin-bottom:22px;background:linear-gradient(90deg,#fff,#dbe9f7);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p.sub{font-size:clamp(1.05rem,2vw,1.3rem);color:#cfe0f2;max-width:60ch;margin-bottom:14px}
+.hero .byline{font-size:1.02rem;color:#eaf3fc;margin-bottom:36px}
+.hero .byline strong{color:#fff}
+.hero .byline .sep{opacity:.45;margin:0 10px}
+.cta{display:flex;flex-wrap:wrap;gap:14px}
+.btn{display:inline-flex;align-items:center;gap:9px;font-weight:700;font-size:.97rem;padding:13px 22px;border-radius:11px;cursor:pointer;border:1.5px solid transparent;transition:transform .18s,box-shadow .18s,background .18s}
+.btn svg{width:18px;height:18px}
+.btn:hover{transform:translateY(-2px)}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 8px 22px rgba(224,138,30,.35)}
+.btn-primary:hover{background:#f0972a;box-shadow:0 12px 28px rgba(224,138,30,.45)}
+.btn-ghost{background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.3)}
+.btn-ghost:hover{background:rgba(255,255,255,.16)}
+.hero-stats{position:relative;z-index:2;margin-top:64px;display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.hstat{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:22px 20px;backdrop-filter:blur(4px)}
+.hstat .num{font-size:2.1rem;font-weight:800;color:#fff;line-height:1}
+.hstat .num .unit{font-size:1.2rem;color:var(--accent);font-weight:700}
+.hstat .lbl{font-size:.85rem;color:#bcd2ea;margin-top:8px}
+
+/* CARDS */
+.grid{display:grid;gap:24px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:28px;box-shadow:var(--shadow-sm);transition:transform .25s,box-shadow .25s,border-color .25s}
+.card:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:#cdddee}
+.card .ico{width:50px;height:50px;border-radius:13px;display:grid;place-items:center;margin-bottom:18px;background:var(--light);color:var(--blue)}
+.card .ico svg{width:26px;height:26px}
+.card h3{font-size:1.18rem;color:var(--dark);margin-bottom:10px}
+.card p{color:var(--muted);font-size:.97rem}
+.card .step-no{font-size:.78rem;font-weight:800;letter-spacing:.1em;color:var(--accent);text-transform:uppercase;margin-bottom:6px;display:block}
+.problem-card{border-left:4px solid var(--accent)}
+.problem-card.solution{border-left-color:var(--green);background:linear-gradient(180deg,#f3fbf7,#fff)}
+.problem-card.solution .ico{background:#e0f3ea;color:var(--green)}
+
+/* FLOW */
+.flow{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch;gap:0}
+.flow .arrow{display:grid;place-items:center;color:var(--blue);padding:0 14px;opacity:.55}
+.flow .arrow svg{width:34px;height:34px}
+.flow .card{height:100%}
+
+/* FORMULA */
+.formula{font-family:"SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;background:var(--dark);color:#e9f2fb;border-radius:12px;padding:16px 18px;font-size:.98rem;overflow-x:auto;white-space:nowrap;margin:14px 0}
+.formula .hl{color:var(--accent);font-weight:700}
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{font-size:.8rem;font-weight:600;background:var(--light);color:var(--dark);padding:5px 11px;border-radius:999px;border:1px solid #d6e4f2}
+.cmp-head{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.cmp-head h3{margin:0}
+.cmp-head .badge{margin-left:auto;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:5px 11px;border-radius:999px}
+.badge-cp{background:var(--accent-soft);color:#b96b12}
+.badge-tk{background:var(--light);color:var(--blue)}
+
+/* TABS */
+.tab-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
+.tab-btn{font-weight:700;font-size:.9rem;padding:9px 18px;border-radius:9px;border:1.5px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;transition:all .2s}
+.tab-btn.active{background:var(--blue);color:#fff;border-color:var(--blue);box-shadow:var(--shadow-sm)}
+.tab-btn:hover:not(.active){background:var(--light);color:var(--dark)}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+/* TABLES */
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-sm);background:#fff}
+table{width:100%;border-collapse:collapse;font-size:.88rem;min-width:700px}
+thead tr th{background:var(--dark);color:#fff;font-weight:700;text-align:left;padding:12px 14px;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+thead tr.sub-head th{background:#1a4e85;font-size:.78rem;letter-spacing:.02em;text-transform:none;font-weight:600;padding:9px 14px}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--line);color:var(--ink)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--bg-alt)}
+.row-group td{background:var(--light);font-weight:800;color:var(--dark);text-transform:uppercase;font-size:.76rem;letter-spacing:.08em;padding:10px 14px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.best{color:var(--green);font-weight:800}
+.teacher-row td{background:#fdfaf5;font-style:italic;color:var(--muted)}
+.teacher-row td strong{color:var(--dark);font-style:normal}
+.pill-dec{font-size:.74rem;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap}
+.pill-tk{background:var(--light);color:var(--blue)}
+.pill-cp{background:var(--accent-soft);color:#b96b12}
+.tbl-cap{font-size:.85rem;color:var(--muted);margin-top:10px;padding:0 2px;font-style:italic}
+
+/* FIGURES */
+.fig-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:28px;margin-top:8px}
+.fig-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm);transition:transform .25s,box-shadow .25s}
+.fig-card:hover{transform:translateY(-4px);box-shadow:var(--shadow)}
+.fig-card.wide{grid-column:span 2}
+.fig-card img{width:100%;display:block;background:var(--bg-alt)}
+.fig-cap{padding:16px 18px 18px}
+.fig-cap strong{display:block;font-size:.92rem;color:var(--dark);margin-bottom:4px}
+.fig-cap span{font-size:.85rem;color:var(--muted)}
+
+/* TECH */
+.tech-section{display:grid;gap:28px}
+.tech-group{}
+.tech-group h4{font-size:.8rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:14px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.tech-badges{display:flex;flex-wrap:wrap;gap:12px}
+.tech{display:inline-flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);padding:10px 16px;border-radius:11px;font-weight:600;font-size:.9rem;color:var(--dark);box-shadow:var(--shadow-sm);transition:transform .18s,box-shadow .18s}
+.tech:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:#cdddee}
+.tech .d{width:9px;height:9px;border-radius:50%;flex:none}
+.tech .tag-note{font-size:.75rem;color:var(--muted);font-weight:400;margin-left:2px}
+
+/* TEAM */
+.team-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:24px}
+.person{display:flex;gap:20px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:26px;box-shadow:var(--shadow-sm);transition:transform .25s,box-shadow .25s}
+.person:hover{transform:translateY(-4px);box-shadow:var(--shadow)}
+.avatar{width:76px;height:76px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:800;font-size:1.3rem;color:#fff}
+.avatar.stu{background:linear-gradient(135deg,var(--blue),#2a72b8)}
+.avatar.adv{background:linear-gradient(135deg,var(--accent),#f0a847)}
+.person .role{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin-bottom:4px}
+.person h3{font-size:1.18rem;color:var(--dark);margin-bottom:3px}
+.person .meta{color:var(--muted);font-size:.9rem}
+
+/* VIDEO */
+.video-frame{position:relative;max-width:820px;margin:0 auto;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;background:linear-gradient(135deg,var(--dark),var(--blue));box-shadow:var(--shadow-lg);display:grid;place-items:center;text-align:center;color:#fff;border:1px solid rgba(255,255,255,.1)}
+.video-frame::before{content:"";position:absolute;inset:0;opacity:.4;background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.16) 1.3px,transparent 0);background-size:26px 26px}
+.video-frame .inner{position:relative;z-index:2;padding:30px}
+.play{width:84px;height:84px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.5);display:grid;place-items:center;margin:0 auto 22px;transition:transform .25s,background .25s;cursor:pointer}
+.play:hover{transform:scale(1.07);background:rgba(255,255,255,.26)}
+.play svg{width:34px;height:34px;margin-left:5px}
+.video-frame h3{font-size:1.4rem;margin-bottom:8px}
+.video-frame p{color:#cfe0f2;max-width:42ch;margin:0 auto}
+.video-frame .soon{display:inline-block;margin-top:18px;font-size:.78rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:var(--accent);color:#fff;padding:6px 14px;border-radius:999px}
+.video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;z-index:3}
+
+/* FOOTER */
+footer{background:var(--darker);color:#cfe0f2;padding:60px 0 34px}
+.foot-top{display:flex;flex-wrap:wrap;gap:34px;justify-content:space-between;align-items:flex-start}
+.foot-brand{max-width:420px}
+.foot-brand .badge-itu{display:inline-flex;align-items:center;gap:12px;font-weight:800;color:#fff;font-size:1.05rem;margin-bottom:14px}
+.foot-brand .badge-itu .mark{width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.12);display:grid;place-items:center;font-weight:800;font-size:.9rem}
+.foot-brand p{font-size:.92rem;color:#a9c2dc;line-height:1.7}
+.foot-links h5{color:#fff;font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px}
+.foot-links a{display:block;color:#a9c2dc;font-size:.9rem;padding:5px 0;transition:color .2s}
+.foot-links a:hover{color:#fff}
+.foot-bottom{border-top:1px solid rgba(255,255,255,.12);margin-top:40px;padding-top:24px;display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;font-size:.86rem;color:#8fabc8}
+
+/* REVEAL */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+.reveal.d1{transition-delay:.08s}.reveal.d2{transition-delay:.16s}.reveal.d3{transition-delay:.24s}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+
+/* RESPONSIVE */
+@media(max-width:900px){
+  .g3,.g2,.team-grid{grid-template-columns:1fr}
+  .hero-stats{grid-template-columns:repeat(2,1fr)}
+  .flow{grid-template-columns:1fr;gap:18px}
+  .flow .arrow{padding:2px 0;transform:rotate(90deg)}
+  .fig-grid{grid-template-columns:1fr}
+  .fig-card.wide{grid-column:span 1}
+  .nav-links{position:absolute;top:100%;left:0;right:0;background:#fff;flex-direction:column;align-items:stretch;gap:0;padding:10px 20px 18px;box-shadow:var(--shadow);border-bottom:1px solid var(--line);display:none}
+  .nav-links.open{display:flex}
+  .nav-links a{padding:12px 10px}
+  .nav-toggle{display:block}
+}
+@media(max-width:520px){
+  section{padding:60px 0}
+  .hero{padding:72px 0 84px}
+  .hero-stats{grid-template-columns:1fr 1fr;gap:12px}
+  .card{padding:22px}
+  .btn{flex:1;justify-content:center}
+}
+</style>
+</head>
+<body>
+
+<!-- ======== NAV ======== -->
+<nav id="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <span class="mark"><svg viewBox="0 0 64 64" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"><circle cx="18" cy="20" r="4"/><circle cx="18" cy="44" r="4"/><circle cx="46" cy="32" r="4"/><path d="M22 20 L42 31 M22 44 L42 33"/></svg></span>
+      <span>Joint KD &amp; Compression</span>
+    </a>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
+    <div class="nav-links" id="navLinks">
+      <a href="#overview">Overview</a>
+      <a href="#framework">Framework</a>
+      <a href="#method">Method</a>
+      <a href="#results">Results</a>
+      <a href="#figures">Figures</a>
+      <a href="#tech">Tech</a>
+      <a href="#team">Team</a>
+      <a href="#video">Video</a>
+    </div>
+  </div>
+</nav>
+
+<span id="top"></span>
+
+<!-- ======== HERO ======== -->
+<header class="hero">
+  <div class="wrap">
+    <span class="tag"><span class="dot"></span>ITU · AI &amp; Data Engineering · Graduation Project 2026</span>
+    <h1>Joint Knowledge Distillation &amp; Tensor-Based Compression of Deep Neural Networks</h1>
+    <p class="sub">A unified framework that compresses <em>and</em> distills neural networks in a single joint training pass — producing edge-ready models up to <strong>64× smaller</strong> while staying within <strong>1.6 percentage points</strong> of the teacher's accuracy.</p>
+    <p class="byline">
+      <strong>Enis Furkan Kırmızı</strong><span class="sep">·</span>Advised by <strong>Prof. Dr. Behçet Uğur Töreyin</strong>
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/efkirmizi/distill" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.3 4.8 18.3 5.1 18.3 5.1c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
+        View on GitHub
+      </a>
+      <a class="btn btn-ghost" href="#report-link" id="reportBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+        Full Report
+      </a>
+      <a class="btn btn-ghost" href="#poster-link" id="posterBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        Poster
+      </a>
+    </div>
+    <div class="hero-stats">
+      <div class="hstat reveal"><div class="num"><span class="counter" data-target="64" data-decimals="0">0</span><span class="unit">×</span></div><div class="lbl">Max parameter compression (CP, CIFAR-100)</div></div>
+      <div class="hstat reveal d1"><div class="num"><span class="counter" data-target="1.6" data-decimals="1">0</span><span class="unit"> pp</span></div><div class="lbl">Accuracy gap to teacher (Tucker, ImageNet-100)</div></div>
+      <div class="hstat reveal d2"><div class="num"><span class="counter" data-target="2.11" data-decimals="2">0</span><span class="unit">×</span></div><div class="lbl">CPU inference speedup (Tucker, ResNet-34→18)</div></div>
+      <div class="hstat reveal d3"><div class="num"><span class="counter" data-target="8" data-decimals="0">0</span></div><div class="lbl">Teacher–student pairs · 2 datasets · 5 objectives</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ======== OVERVIEW ======== -->
+<section id="overview">
+  <div class="wrap">
+    <span class="eyebrow reveal">Project Description</span>
+    <h2 class="section-title reveal">Compressing deep networks for the edge — without breaking them</h2>
+    <p class="section-lead reveal">Modern vision models far exceed the memory and power budgets of drones, IoT sensors and medical-imaging hardware. This project resolves the two failure modes of existing compression by unifying them into one joint optimization.</p>
+    <div class="grid g3">
+      <div class="card problem-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
+        <h3>Tensor decomposition breaks</h3>
+        <p>Factorizing a pre-trained network and fine-tuning it sequentially triggers vanishing gradients and catastrophic accuracy collapse at high compression.</p>
+      </div>
+      <div class="card problem-card reveal d1">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div>
+        <h3>Distillation collapses</h3>
+        <p>Knowledge distillation breaks down under the <em>capacity gap</em> at extreme compression ratios, and becomes ill-defined once a student's layers are tensor-factorized.</p>
+      </div>
+      <div class="card problem-card solution reveal d2">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
+        <h3>Our joint framework</h3>
+        <p>Build the compressed students <strong>from scratch</strong> and co-train them under one frozen teacher in a single pass — compression and knowledge transfer happen together, not in fragile stages.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== FRAMEWORK ======== -->
+<section id="framework" class="bg-alt">
+  <div class="wrap">
+    <span class="eyebrow reveal">Proposed Framework</span>
+    <h2 class="section-title reveal">Three fully automatic stages</h2>
+    <p class="section-lead reveal">Every design choice is derived from the teacher itself — no global compression ratio, no validation search, no hand-tuned coefficients.</p>
+
+    <div class="fig-card wide reveal" style="margin-bottom:28px">
+      <img src="figures/fig1_pipeline.png" alt="Joint distillation and tensor compression pipeline diagram" loading="lazy">
+      <div class="fig-cap"><strong>Figure 1 — Proposed Framework</strong><span>A single joint optimization replaces the sequential pipeline. Both CP and Tucker students are built from scratch and co-trained under one frozen teacher, sharing a single forward pass each step — roughly twice the cost of single-student distillation, not three times.</span></div>
+    </div>
+
+    <div class="flow">
+      <div class="card reveal">
+        <span class="step-no">Stage 1 — Where to supervise</span>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 6h3a3 3 0 0 1 3 3v0M9 18h3a3 3 0 0 0 3-3v0"/></svg></div>
+        <h3>PURSUhInT</h3>
+        <p>K-means clustering on teacher layer representations using <em>1 − R²<sub>CCA</sub></em> distance selects one non-redundant hint point per cluster (K=3 CIFAR, K=4 ImageNet-100). Avoids redundant supervision from semantically similar layers.</p>
+      </div>
+      <div class="arrow reveal d1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      <div class="card reveal d1">
+        <span class="step-no">Stage 2 — How much to compress</span>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 2 4-6"/></svg></div>
+        <h3>EVBMF Rank Estimation</h3>
+        <p>Reads the teacher's trained weight spectrum and thresholds singular values against the Marchenko–Pastur noise distribution — setting each layer's rank automatically. Non-uniform allocation: early layers ≈59%, deep layers 36–44%.</p>
+      </div>
+      <div class="arrow reveal d2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      <div class="card reveal d2">
+        <span class="step-no">Stage 3 — Joint training</span>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="8.5" y="14" width="7" height="7" rx="1"/><path d="M6.5 10v2a2 2 0 0 0 2 2M17.5 10v2a2 2 0 0 1-2 2"/></svg></div>
+        <h3>Dual Co-training</h3>
+        <p>A CP and a Tucker student are co-trained under one shared teacher forward pass, combining cross-entropy, KL-divergence and spatial attention transfer with learned Kendall uncertainty weights — eliminating all manual loss coefficients.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== METHOD ======== -->
+<section id="method">
+  <div class="wrap">
+    <span class="eyebrow reveal">Technical Details</span>
+    <h2 class="section-title reveal">Two complementary decompositions, one teacher</h2>
+    <p class="section-lead reveal">Both students share the same base architecture but factorize every eligible convolution differently, creating a controllable Pareto trade-off between model size and accuracy.</p>
+    <div class="grid g2">
+      <div class="card reveal">
+        <div class="cmp-head"><h3>CP Decomposition</h3><span class="badge badge-cp">4 ops / conv</span></div>
+        <div class="formula">𝒲 ≈ <span class="hl">Σ</span><sub>r=1</sub><sup>R</sup> aᵣ ⊗ bᵣ ⊗ cᵣ ⊗ dᵣ</div>
+        <p>Replaces each 2D convolution with four separable operations: <code>1×1 → dw-k<sub>H</sub> → dw-k<sub>W</sub> → 1×1</code>. Separable spatial filtering discards all cross-channel interaction outside the pointwise stages — yielding the <strong>highest compression ratio</strong>.</p>
+        <div class="chip-row"><span class="chip">Params: R(C<sub>in</sub>+k<sub>H</sub>+k<sub>W</sub>+C<sub>out</sub>)</span><span class="chip">Up to 64× compression</span><span class="chip">Up to 52× FLOPs reduction</span></div>
+      </div>
+      <div class="card reveal d1">
+        <div class="cmp-head"><h3>Tucker Decomposition</h3><span class="badge badge-tk">3 ops / conv</span></div>
+        <div class="formula">𝒲 ≈ 𝒢 <span class="hl">×₁</span> U<sub>out</sub> <span class="hl">×₂</span> U<sub>in</sub></div>
+        <p>Replaces each 2D convolution with three operations: <code>1×1 → k<sub>H</sub>×k<sub>W</sub> core → 1×1</code>. The dense core preserves cross-channel correlations across all spatial positions — delivering <strong>higher accuracy and lower latency</strong> despite more parameters than CP.</p>
+        <div class="chip-row"><span class="chip">Params: R<sub>in</sub>C<sub>in</sub>+R<sub>in</sub>R<sub>out</sub>k<sub>H</sub>k<sub>W</sub>+R<sub>out</sub>C<sub>out</sub></span><span class="chip">Separate R<sub>out</sub>, R<sub>in</sub> per layer</span><span class="chip">Faster despite more params</span></div>
+      </div>
+    </div>
+    <div class="card reveal d1" style="margin-top:24px">
+      <div class="cmp-head"><h3>Automatic Loss Balancing — Kendall Uncertainty Weighting</h3><span class="badge badge-tk">Zero hand-tuned coefficients</span></div>
+      <div class="formula">ℒ = <span class="hl">Σ</span><sub>i ∈ {CE, KL, AT}</sub> ( e<sup>−sᵢ</sup> ℒᵢ + sᵢ )</div>
+      <p>The three losses (cross-entropy, KL-divergence, spatial attention transfer) operate at wildly different numerical scales. Learnable log-variance weights <em>s<sub>i</sub></em> equalize their gradient contributions to within 10% automatically. At epoch 99: CE contribution 0.90, KL 1.00, AT 0.91 — despite the raw AT weight being 702× larger.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======== RESULTS ======== -->
+<section id="results" class="bg-alt">
+  <div class="wrap">
+    <span class="eyebrow reveal">Project Outcomes</span>
+    <h2 class="section-title reveal">Full experimental results — 8 pairs, 2 datasets, 5 objectives</h2>
+    <p class="section-lead reveal">Every configuration uses the identical pipeline (same EVBMF ranks, same PURSUhInT hint points, same co-training loop) with only the distillation criterion changed. Bold values are the best Top-1 in each column.</p>
+
+    <div class="tab-bar reveal" id="tabBar">
+      <button class="tab-btn active" data-tab="t1">Table 1 · ImageNet-100</button>
+      <button class="tab-btn" data-tab="t2">Table 2 · CIFAR-100 (configs 1–3)</button>
+      <button class="tab-btn" data-tab="t3">Table 3 · CIFAR-100 (configs 4–6)</button>
+    </div>
+
+    <!-- TABLE 1: ImageNet-100 -->
+    <div class="tab-pane active reveal" id="t1">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th rowspan="2">Method</th><th rowspan="2">Decomp.</th>
+              <th class="num" rowspan="2">Top-1 %</th><th class="num" rowspan="2">Top-5 %</th>
+              <th class="num" rowspan="2">Params</th><th class="num" rowspan="2">FLOPs</th>
+              <th class="num" rowspan="2">Params Compr.</th><th class="num" rowspan="2">FLOPs Compr.</th>
+            </tr>
+            <tr></tr>
+          </thead>
+          <tbody>
+            <tr class="row-group"><td colspan="8">ResNet-34 → ResNet-18</td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (ResNet-34)</strong></td><td class="num">81.72</td><td class="num">95.38</td><td class="num">21.34 M</td><td class="num">3.68 G</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">77.16</td><td class="num">93.68</td><td class="num" rowspan="5">1.33 M</td><td class="num" rowspan="5">277.99 M</td><td class="num" rowspan="5">16.04×</td><td class="num" rowspan="5">13.23×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">78.48</td><td class="num">94.70</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">79.50</td><td class="num best">95.00</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">78.52</td><td class="num">94.54</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">77.44</td><td class="num">94.42</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">77.26</td><td class="num">94.14</td><td class="num" rowspan="5">3.25 M</td><td class="num" rowspan="5">655.50 M</td><td class="num" rowspan="5">6.56×</td><td class="num" rowspan="5">5.60×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">80.22</td><td class="num best">95.34</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">80.12</td><td class="num">95.32</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">79.88</td><td class="num">95.14</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">79.44</td><td class="num">95.16</td></tr>
+
+            <tr class="row-group"><td colspan="8">ResNet-50 → ResNet-18</td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (ResNet-50)</strong></td><td class="num">82.54</td><td class="num">95.96</td><td class="num">23.71 M</td><td class="num">4.13 G</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">78.10</td><td class="num">93.94</td><td class="num" rowspan="5">1.35 M</td><td class="num" rowspan="5">270.15 M</td><td class="num" rowspan="5">17.59×</td><td class="num" rowspan="5">15.29×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">78.48</td><td class="num">94.44</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">79.60</td><td class="num best">94.84</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">78.14</td><td class="num">94.04</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">78.58</td><td class="num">94.52</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">77.66</td><td class="num">93.94</td><td class="num" rowspan="5">3.18 M</td><td class="num" rowspan="5">600.63 M</td><td class="num" rowspan="5">7.46×</td><td class="num" rowspan="5">6.88×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">80.10</td><td class="num">95.28</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">81.04</td><td class="num best">95.56</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">80.18</td><td class="num">95.48</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">80.24</td><td class="num">95.34</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tbl-cap">Bold = column best. AT is best-performing objective in both pairs. Tucker's best (81.04%) is only 1.50 pp below the teacher (82.54%) at 7.46× compression.</p>
+    </div>
+
+    <!-- TABLE 2: CIFAR-100 configs 1-3 -->
+    <div class="tab-pane" id="t2">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Decomp.</th><th class="num">Top-1 %</th><th class="num">Top-5 %</th><th class="num">Params</th><th class="num">FLOPs</th><th class="num">Params Compr.</th><th class="num">FLOPs Compr.</th></tr></thead>
+          <tbody>
+            <!-- WRN-40-2 → WRN-16-2 -->
+            <tr class="row-group"><td colspan="8">WRN-40-2 → WRN-16-2</td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (WRN-40-2)</strong></td><td class="num">76.79</td><td class="num">93.60</td><td class="num">2.26 M</td><td class="num">330.43 M</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">69.01</td><td class="num">91.63</td><td class="num" rowspan="5">111.80 K</td><td class="num" rowspan="5">17.20 M</td><td class="num" rowspan="5">20.27×</td><td class="num" rowspan="5">19.21×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">71.47</td><td class="num">92.80</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">71.85</td><td class="num best">93.00</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">71.34</td><td class="num">92.47</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">70.59</td><td class="num">92.79</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">68.79</td><td class="num">91.17</td><td class="num" rowspan="5">332.76 K</td><td class="num" rowspan="5">52.03 M</td><td class="num" rowspan="5">6.78×</td><td class="num" rowspan="5">6.35×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.95</td><td class="num">92.97</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">72.23</td><td class="num best">93.16</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.33</td><td class="num">92.75</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.82</td><td class="num">92.87</td></tr>
+
+            <!-- WRN-40-2 → ResNet-8×4 cross-arch -->
+            <tr class="row-group"><td colspan="8">WRN-40-2 → ResNet-8×4 <em>(cross-architecture)</em></td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (WRN-40-2)</strong></td><td class="num">76.01</td><td class="num">93.79</td><td class="num">2.26 M</td><td class="num">330.43 M</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">73.27</td><td class="num">93.45</td><td class="num" rowspan="5">258.77 K</td><td class="num" rowspan="5">39.05 M</td><td class="num" rowspan="5">8.71×</td><td class="num" rowspan="5">8.46×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">72.65</td><td class="num">93.11</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">73.56</td><td class="num best">93.50</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">72.29</td><td class="num">93.08</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">72.30</td><td class="num">93.11</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.61</td><td class="num">93.13</td><td class="num" rowspan="5">726.67 K</td><td class="num" rowspan="5">92.24 M</td><td class="num" rowspan="5">3.10×</td><td class="num" rowspan="5">3.58×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">72.03</td><td class="num">92.82</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">72.20</td><td class="num">93.28</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">72.25</td><td class="num best">92.98</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.22</td><td class="num">92.81</td></tr>
+
+            <!-- ResNet-32×4 → ResNet-8×4 -->
+            <tr class="row-group"><td colspan="8">ResNet-32×4 → ResNet-8×4</td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (ResNet-32×4)</strong></td><td class="num">79.61</td><td class="num">94.94</td><td class="num">7.43 M</td><td class="num">1.09 G</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">71.88</td><td class="num">92.40</td><td class="num" rowspan="5">252.53 K</td><td class="num" rowspan="5">48.77 M</td><td class="num" rowspan="5">29.44×</td><td class="num" rowspan="5">22.31×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">72.44</td><td class="num">92.78</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">73.54</td><td class="num best">93.49</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">72.79</td><td class="num">92.92</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">73.08</td><td class="num">93.37</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">70.85</td><td class="num">92.59</td><td class="num" rowspan="5">679.70 K</td><td class="num" rowspan="5">130.57 M</td><td class="num" rowspan="5">10.94×</td><td class="num" rowspan="5">8.33×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.70</td><td class="num">92.98</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">73.14</td><td class="num best">93.63</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.44</td><td class="num">92.54</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">72.17</td><td class="num">93.22</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tbl-cap">AT best in 5 of 6 columns (WRN-40-2→ResNet-8×4 Tucker exception: VID wins by 0.05 pp). Cross-architecture transfer works without any modification.</p>
+    </div>
+
+    <!-- TABLE 3: CIFAR-100 configs 4-6 -->
+    <div class="tab-pane" id="t3">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Decomp.</th><th class="num">Top-1 %</th><th class="num">Top-5 %</th><th class="num">Params</th><th class="num">FLOPs</th><th class="num">Params Compr.</th><th class="num">FLOPs Compr.</th></tr></thead>
+          <tbody>
+            <!-- ResNet-32×4 → WRN-16-2 cross-arch -->
+            <tr class="row-group"><td colspan="8">ResNet-32×4 → WRN-16-2 <em>(cross-architecture, largest compression)</em></td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (ResNet-32×4)</strong></td><td class="num">79.64</td><td class="num">94.69</td><td class="num">7.43 M</td><td class="num">1.09 G</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">66.02</td><td class="num">89.78</td><td class="num" rowspan="5">116.09 K</td><td class="num" rowspan="5">20.83 M</td><td class="num" rowspan="5">64.04×</td><td class="num" rowspan="5">52.24×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">71.36</td><td class="num">92.50</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">72.01</td><td class="num best">93.26</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">69.29</td><td class="num">91.46</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">71.47</td><td class="num">92.71</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">68.25</td><td class="num">91.23</td><td class="num" rowspan="5">340.19 K</td><td class="num" rowspan="5">70.65 M</td><td class="num" rowspan="5">21.85×</td><td class="num" rowspan="5">15.40×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">71.59</td><td class="num">92.92</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">73.06</td><td class="num best">93.46</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">68.52</td><td class="num">91.58</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">72.05</td><td class="num">93.06</td></tr>
+
+            <!-- ResNet-110 → ResNet-20 -->
+            <tr class="row-group"><td colspan="8">ResNet-110 → ResNet-20</td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (ResNet-110)</strong></td><td class="num">74.30</td><td class="num">93.21</td><td class="num">1.74 M</td><td class="num">257.40 M</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">63.64</td><td class="num">89.00</td><td class="num" rowspan="5">47.60 K</td><td class="num" rowspan="5">8.35 M</td><td class="num" rowspan="5">36.48×</td><td class="num" rowspan="5">30.83×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">66.67</td><td class="num">90.60</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">66.06</td><td class="num">90.37</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">66.74</td><td class="num best">91.12</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">65.23</td><td class="num">90.25</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">65.79</td><td class="num">90.61</td><td class="num" rowspan="5">127.24 K</td><td class="num" rowspan="5">23.00 M</td><td class="num" rowspan="5">13.65×</td><td class="num" rowspan="5">11.19×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">67.43</td><td class="num best">91.35</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">67.15</td><td class="num">90.92</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">67.09</td><td class="num">91.33</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">66.72</td><td class="num">90.72</td></tr>
+
+            <!-- VGG-13 → VGG-8 -->
+            <tr class="row-group"><td colspan="8">VGG-13 → VGG-8</td></tr>
+            <tr class="teacher-row"><td colspan="2"><strong>Teacher (VGG-13)</strong></td><td class="num">75.21</td><td class="num">92.49</td><td class="num">9.46 M</td><td class="num">285.99 M</td><td class="num">1.0×</td><td class="num">1.0×</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num best">70.79</td><td class="num best">91.44</td><td class="num" rowspan="5">574.08 K</td><td class="num" rowspan="5">14.79 M</td><td class="num" rowspan="5">16.48×</td><td class="num" rowspan="5">19.34×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">70.20</td><td class="num">91.34</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">70.26</td><td class="num">91.49</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">70.28</td><td class="num">91.35</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-cp">CP</span></td><td class="num">69.10</td><td class="num">90.97</td></tr>
+            <tr><td>KD</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num best">69.85</td><td class="num best">91.29</td><td class="num" rowspan="5">1.63 M</td><td class="num" rowspan="4">40.21 M</td><td class="num" rowspan="5">5.82×</td><td class="num" rowspan="5">7.11×</td></tr>
+            <tr><td>FitNet</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">68.94</td><td class="num">90.60</td></tr>
+            <tr><td>AT</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">69.22</td><td class="num">91.03</td></tr>
+            <tr><td>VID</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">68.55</td><td class="num">90.86</td></tr>
+            <tr><td>WSL</td><td><span class="pill-dec pill-tk">Tucker</span></td><td class="num">67.98</td><td class="num">90.36</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tbl-cap">VGG-13→VGG-8 is the only pair where logit-only KD outperforms all feature-based methods — VGG's lack of residual connections makes attention-map transfer less effective. The 64.04× CP compression (ResNet-32×4→WRN-16-2) still achieves 72.01% Top-1.</p>
+    </div>
+
+    <!-- CP vs Tucker trade-off -->
+    <div style="margin-top:48px">
+      <h3 class="reveal" style="color:var(--dark);font-size:1.3rem;margin-bottom:18px">CP vs. Tucker — a Pareto trade-off that never reverses</h3>
+      <div class="grid g2" style="align-items:start">
+        <div class="table-wrap reveal">
+          <table>
+            <thead><tr><th>Metric</th><th class="num">CP</th><th class="num">Tucker</th></tr></thead>
+            <tbody>
+              <tr><td style="font-weight:700">Parameter compression</td><td class="num" style="color:var(--blue);font-weight:700">up to 64×</td><td class="num" style="color:var(--blue);font-weight:700">up to 22×</td></tr>
+              <tr><td style="font-weight:700">FLOPs compression</td><td class="num" style="color:var(--blue);font-weight:700">up to 52×</td><td class="num" style="color:var(--blue);font-weight:700">up to 15×</td></tr>
+              <tr><td style="font-weight:700">Top-1 accuracy</td><td class="num">Lower</td><td class="num best">Higher ✓</td></tr>
+              <tr><td style="font-weight:700">CPU latency speedup</td><td class="num">1.96×</td><td class="num best">2.11× ✓</td></tr>
+              <tr><td style="font-weight:700">Ops per conv</td><td class="num">4</td><td class="num">3</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card reveal d1">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg></div>
+          <h3>Tucker is faster despite more parameters</h3>
+          <p>ResNet-34→18 CPU latency: <strong>265.98 ms</strong> teacher → <strong>135.88 ms</strong> CP (1.96×) → <strong>125.91 ms</strong> Tucker (2.11×). Tucker carries 2.4× more parameters than CP yet runs faster because its 3-operation kernel chain issues fewer sequential CUDA/CPU kernel launches than CP's 4-operation chain, and its dense core convolution maps more efficiently to hardware.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== FIGURES ======== -->
+<section id="figures">
+  <div class="wrap">
+    <span class="eyebrow reveal">Figures</span>
+    <h2 class="section-title reveal">Visualizations from the report</h2>
+    <p class="section-lead reveal">Key charts covering the accuracy–compression Pareto frontier, EVBMF per-layer rank allocation, training convergence trajectories and automatic loss balancing.</p>
+
+    <div class="fig-grid">
+      <div class="fig-card wide reveal">
+        <img src="figures/fig3_pareto.png" alt="Accuracy vs parameter compression Pareto plot for ResNet-34→ResNet-18 on ImageNet-100" loading="lazy">
+        <div class="fig-cap">
+          <strong>Figure 3 — Accuracy–Compression Pareto Frontier (ResNet-34→ResNet-18, ImageNet-100)</strong>
+          <span>Each point is one (distillation method, decomposition) pair. Tucker points (squares) cluster at 6.56× compression; CP points (circles) at 16.04×. Tucker consistently dominates CP in accuracy at every compression level — the ordering never reverses. AT and FitNet are the top-performing objectives across both decompositions.</span>
+        </div>
+      </div>
+
+      <div class="fig-card wide reveal d1">
+        <img src="figures/fig5_ranks.png" alt="EVBMF per-layer rank distribution for ResNet-34→ResNet-18, ImageNet-100" loading="lazy">
+        <div class="fig-cap">
+          <strong>Figure 5 — EVBMF Per-Layer Rank Allocation (ResNet-34→ResNet-18, ImageNet-100)</strong>
+          <span>Top: CP ranks (absolute, 17 decomposable layers). Bottom: Tucker's separate (R<sub>out</sub>, R<sub>in</sub>) rank pairs. Both distributions are markedly non-uniform — early layers retain ≈59% of channels while deep layers fall to 36–44%. A uniform 50% ratio would over-allocate parameters to redundant deep layers and under-allocate them to the information-rich early layers.</span>
+        </div>
+      </div>
+
+      <div class="fig-card reveal d1">
+        <img src="figures/fig7_convergence.png" alt="Training convergence of CP and Tucker students under AT framework" loading="lazy">
+        <div class="fig-cap">
+          <strong>Figure 7 — Training Convergence under AT Framework (ResNet-34→ResNet-18)</strong>
+          <span>Tucker (amber) leads CP (purple) at every single epoch — no crossover. After the first LR decay at epoch 30 Tucker reaches 80.12% and CP reaches 79.50%, a consistent gap of ≈0.62 pp through training. Teacher accuracy dashed at 81.72%.</span>
+        </div>
+      </div>
+
+      <div class="fig-card reveal d2">
+        <img src="figures/fig8_lossweights.png" alt="Kendall uncertainty loss weight evolution for CP and Tucker students" loading="lazy">
+        <div class="fig-cap">
+          <strong>Figure 8 — Kendall Uncertainty Loss-Weight Evolution (ResNet-34→ResNet-18)</strong>
+          <span>The three effective task weights exp(−s) for CE (blue), KL (red) and AT (green) on log scale over 100 epochs. The AT weight rises to ≈700× above CE, but this is scale normalisation, not dominance — at epoch 99 the weighted gradient contributions are CE 0.90, KL 1.00, AT 0.91: within 10% of each other.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== TECH ======== -->
+<section id="tech" class="bg-alt">
+  <div class="wrap">
+    <span class="eyebrow reveal">Technologies Used</span>
+    <h2 class="section-title reveal">Built on a modern PyTorch research stack</h2>
+    <p class="section-lead reveal">The entire pipeline — from GPU-accelerated data loading to FLOP profiling — is reproducible end to end with a single shell script per dataset.</p>
+
+    <div class="tech-section">
+      <div class="tech-group reveal">
+        <h4>Language &amp; Core Framework</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#3776AB"></span>Python 3.x</span>
+          <span class="tech"><span class="d" style="background:#EE4C2C"></span>PyTorch ≥ 2.0 <span class="tag-note">DDP · AMP · torch.compile · torch.linalg</span></span>
+          <span class="tech"><span class="d" style="background:#EE4C2C"></span>torchvision <span class="tag-note">transforms, dataset loaders</span></span>
+        </div>
+      </div>
+
+      <div class="tech-group reveal d1">
+        <h4>Distributed Training &amp; Acceleration</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#76B900"></span>NVIDIA DALI <span class="tag-note">GPU-accelerated ImageNet-100 data pipeline</span></span>
+          <span class="tech"><span class="d" style="background:#76B900"></span>NVIDIA Apex <span class="tag-note">SyncBN + mixed precision for DDP</span></span>
+          <span class="tech"><span class="d" style="background:#EE4C2C"></span>DistributedDataParallel (torchrun) <span class="tag-note">multi-GPU ImageNet training</span></span>
+          <span class="tech"><span class="d" style="background:#EE4C2C"></span>Automatic Mixed Precision (AMP) <span class="tag-note">GradScaler, float16 + float32</span></span>
+        </div>
+      </div>
+
+      <div class="tech-group reveal d2">
+        <h4>Numerics &amp; Tensor Decomposition</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#1E5C9B"></span>TensorLy <span class="tag-note">PARAFAC / Tucker decomposition (architecture init)</span></span>
+          <span class="tech"><span class="d" style="background:#8CAAE6"></span>SciPy ≥ 1.9.0 <span class="tag-note">EVBMF numerical routines, CKA / CCA utilities</span></span>
+          <span class="tech"><span class="d" style="background:#4DABCF"></span>NumPy ≥ 1.21.0 <span class="tag-note">array operations, rank maps</span></span>
+          <span class="tech"><span class="d" style="background:#EE4C2C"></span>torch.linalg.eigh / svd <span class="tag-note">per-layer EVBMF, Kendall weighting</span></span>
+        </div>
+      </div>
+
+      <div class="tech-group reveal">
+        <h4>Profiling, Monitoring &amp; Utilities</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#E08A1E"></span>THOP <span class="tag-note">FLOPs + parameter counting on deployed models (CPU, no CUDA overhead)</span></span>
+          <span class="tech"><span class="d" style="background:#FF6F00"></span>TensorBoard <span class="tag-note">tensorboard-logger, training curves</span></span>
+          <span class="tech"><span class="d" style="background:#4DABCF"></span>psutil <span class="tag-note">RAM / memory monitoring during teacher caching</span></span>
+          <span class="tech"><span class="d" style="background:#777"></span>tqdm <span class="tag-note">epoch-level progress bars</span></span>
+          <span class="tech"><span class="d" style="background:#20BEFF"></span>Kaggle API <span class="tag-note">ImageNet-100 dataset acquisition</span></span>
+          <span class="tech"><span class="d" style="background:#34A853"></span>Pillow ≥ 9.0.0 <span class="tag-note">image I/O</span></span>
+        </div>
+      </div>
+
+      <div class="tech-group reveal d1">
+        <h4>Datasets</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#143F6B"></span>CIFAR-100 <span class="tag-note">60k images · 32×32 · 100 classes · 50k train / 10k test · 240 epochs</span></span>
+          <span class="tech"><span class="d" style="background:#143F6B"></span>ImageNet-100 <span class="tag-note">100-class subset of ILSVRC-2012 · 224×224 · 100 epochs · DALI pipeline</span></span>
+        </div>
+      </div>
+
+      <div class="tech-group reveal d2">
+        <h4>Architectures (CIFAR-100)</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#2e9e6b"></span>ResNet <span class="tag-note">resnet8/14/20/32/44/56/110 · resnet8×4 · resnet32×4</span></span>
+          <span class="tech"><span class="d" style="background:#2e9e6b"></span>WideResNet <span class="tag-note">wrn_16_1 · wrn_16_2 · wrn_40_1 · wrn_40_2</span></span>
+          <span class="tech"><span class="d" style="background:#2e9e6b"></span>VGG (BN) <span class="tag-note">vgg8 · vgg11 · vgg13 · vgg16 · vgg19</span></span>
+          <span class="tech"><span class="d" style="background:#2e9e6b"></span>MobileNetV2 <span class="tag-note">full + mobile_half (half-width variant)</span></span>
+          <span class="tech"><span class="d" style="background:#2e9e6b"></span>ShuffleNet V1 / V2</span>
+        </div>
+      </div>
+
+      <div class="tech-group reveal">
+        <h4>Architectures (ImageNet-100)</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#143F6B"></span>ResNet-18 <span class="tag-note">student (both pairs)</span></span>
+          <span class="tech"><span class="d" style="background:#143F6B"></span>ResNet-34 <span class="tag-note">teacher (pair 1)</span></span>
+          <span class="tech"><span class="d" style="background:#143F6B"></span>ResNet-50 <span class="tag-note">teacher (pair 2)</span></span>
+          <span class="tech"><span class="d" style="background:#143F6B"></span>ResNet-101 <span class="tag-note">supported</span></span>
+        </div>
+      </div>
+
+      <div class="tech-group reveal d1">
+        <h4>Distillation Objectives Studied</h4>
+        <div class="tech-badges">
+          <span class="tech"><span class="d" style="background:#1E5C9B"></span>KD <span class="tag-note">Hinton et al. — logit-only KL divergence, temperature τ=4</span></span>
+          <span class="tech"><span class="d" style="background:#1E5C9B"></span>FitNet <span class="tag-note">Romero et al. — hint layer regression via ConvReg adapters</span></span>
+          <span class="tech"><span class="d" style="background:#1E5C9B"></span>AT <span class="tag-note">Zagoruyko &amp; Komodakis — spatial attention map MSE (framework default)</span></span>
+          <span class="tech"><span class="d" style="background:#1E5C9B"></span>VID <span class="tag-note">Ahn et al. — variational information distillation, per-channel Gaussian NLL</span></span>
+          <span class="tech"><span class="d" style="background:#1E5C9B"></span>WSL <span class="tag-note">Zhou et al. — weighted soft labels with focal weighting</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== TEAM ======== -->
+<section id="team">
+  <div class="wrap">
+    <span class="eyebrow reveal">Project Team</span>
+    <h2 class="section-title reveal">The people behind the project</h2>
+    <p class="section-lead reveal">Istanbul Technical University · Faculty of Computer and Informatics · Department of Artificial Intelligence and Data Engineering · June 2026.</p>
+    <div class="team-grid">
+      <div class="person reveal">
+        <div class="avatar stu">EFK</div>
+        <div>
+          <div class="role">Author &amp; Developer</div>
+          <h3>Enis Furkan Kırmızı</h3>
+          <div class="meta">Student No. 150230740</div>
+        </div>
+      </div>
+      <div class="person reveal d1">
+        <div class="avatar adv">BUT</div>
+        <div>
+          <div class="role">Academic Advisor</div>
+          <h3>Prof. Dr. Behçet Uğur Töreyin</h3>
+          <div class="meta">Project Supervisor</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== VIDEO ======== -->
+<section id="video" class="bg-alt">
+  <div class="wrap">
+    <span class="eyebrow reveal" style="text-align:center;display:block">Presentation</span>
+    <h2 class="section-title reveal" style="text-align:center">Two-minute project summary</h2>
+    <p class="section-lead reveal" style="margin:0 auto 46px;text-align:center">A short video walkthrough of the motivation, method and key results.</p>
+    <!--
+      TO EMBED: delete the .inner placeholder, uncomment the iframe, replace VIDEO_ID.
+    -->
+    <div class="video-frame reveal">
+      <!--
+      <iframe src="https://www.youtube.com/embed/VIDEO_ID"
+              title="Project summary video"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen></iframe>
+      -->
+      <div class="inner">
+        <div class="play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></div>
+        <h3>Video coming soon</h3>
+        <p>The 2-minute presentation will be embedded here once published to YouTube.</p>
+        <span class="soon">Stay tuned</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== FOOTER ======== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <div class="badge-itu"><span class="mark">İTÜ</span>Istanbul Technical University</div>
+        <p>Faculty of Computer and Informatics<br>Department of Artificial Intelligence &amp; Data Engineering<br>İTÜ Ayazağa Campus, 34469, Maslak / İstanbul<br><a href="mailto:bbf@itu.edu.tr">bbf@itu.edu.tr</a> · <a href="https://yapayzeka.itu.edu.tr" target="_blank" rel="noopener">yapayzeka.itu.edu.tr</a></p>
+      </div>
+      <div class="foot-links">
+        <h5>Project</h5>
+        <a href="https://github.com/efkirmizi/distill" target="_blank" rel="noopener">Source Code (GitHub)</a>
+        <a href="#report-link">Full Report (PDF)</a>
+        <a href="#poster-link">Poster (PDF)</a>
+        <a href="#video">Presentation Video</a>
+      </div>
+      <div class="foot-links">
+        <h5>Explore</h5>
+        <a href="#overview">Overview</a>
+        <a href="#framework">Framework</a>
+        <a href="#results">Results</a>
+        <a href="#figures">Figures</a>
+        <a href="#tech">Technologies</a>
+        <a href="#team">Team</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 Enis Furkan Kırmızı · Graduation Project</span>
+      <span>Joint Knowledge Distillation &amp; Tensor-Based Compression of DNNs</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Sticky nav
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => nav.classList.toggle('scrolled', window.scrollY > 8), {passive:true});
+
+// Mobile nav
+document.getElementById('navToggle').addEventListener('click', () => document.getElementById('navLinks').classList.toggle('open'));
+document.getElementById('navLinks').querySelectorAll('a').forEach(a => a.addEventListener('click', () => document.getElementById('navLinks').classList.remove('open')));
+
+// Tabs
+document.getElementById('tabBar').addEventListener('click', e => {
+  const btn = e.target.closest('.tab-btn');
+  if (!btn) return;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(btn.dataset.tab).classList.add('active');
+});
+
+// Counter animation
+function animateCounter(el) {
+  const target = parseFloat(el.dataset.target);
+  const decimals = parseInt(el.dataset.decimals || '0', 10);
+  const dur = 1300, start = performance.now();
+  const tick = now => {
+    const p = Math.min((now - start) / dur, 1);
+    el.textContent = (target * (1 - Math.pow(1 - p, 3))).toFixed(decimals);
+    if (p < 1) requestAnimationFrame(tick); else el.textContent = target.toFixed(decimals);
+  };
+  requestAnimationFrame(tick);
+}
+
+// Reveal on scroll
+if ('IntersectionObserver' in window) {
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('in');
+      entry.target.querySelectorAll?.('.counter:not([data-done])').forEach(c => {
+        c.dataset.done = '1'; animateCounter(c);
+      });
+      io.unobserve(entry.target);
+    });
+  }, {threshold: 0.12, rootMargin: '0px 0px -40px 0px'});
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+} else {
+  document.querySelectorAll('.reveal').forEach(el => el.classList.add('in'));
+  document.querySelectorAll('.counter').forEach(animateCounter);
+}
+</script>
+</body>
+</html>
