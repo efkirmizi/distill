@@ -557,7 +557,7 @@ footer{background:var(--darker);color:#cfe0f2;padding:60px 0 34px}
   <div class="wrap">
     <span class="eyebrow reveal">Figures</span>
     <h2 class="section-title reveal">Visualizations from the report</h2>
-    <p class="section-lead reveal">Key charts covering the accuracy–compression Pareto frontier, EVBMF per-layer rank allocation, training convergence trajectories and automatic loss balancing.</p>
+    <p class="section-lead reveal">Key charts covering the accuracy–compression Pareto frontiers across all benchmarks, EVBMF per-layer rank allocation, training convergence trajectories for both students, and automatic loss balancing.</p>
 
     <div class="fig-grid">
       <div class="fig-card wide reveal">
@@ -589,6 +589,62 @@ footer{background:var(--darker);color:#cfe0f2;padding:60px 0 34px}
         <div class="fig-cap">
           <strong>Figure 8 — Kendall Uncertainty Loss-Weight Evolution (ResNet-34→ResNet-18)</strong>
           <span>The three effective task weights exp(−s) for CE (blue), KL (red) and AT (green) on log scale over 100 epochs. The AT weight rises to ≈700× above CE, but this is scale normalisation, not dominance — at epoch 99 the weighted gradient contributions are CE 0.90, KL 1.00, AT 0.91: within 10% of each other.</span>
+        </div>
+      </div>
+
+      <div class="fig-card wide reveal d2">
+        <img src="figures/_overview_imagenet100.png" alt="Accuracy vs parameters Pareto plot for both ImageNet-100 teacher-student pairs comparing all distillation methods" loading="lazy">
+        <div class="fig-cap">
+          <strong>Accuracy–Compression Pareto Frontier — ImageNet-100 (Both Pairs)</strong>
+          <span>Both ImageNet-100 pairs side-by-side. Left: ResNet-34→ResNet-18 (CP 16.0× / Tucker 6.6× smaller). Right: ResNet-50→ResNet-18 (CP 17.6× / Tucker 7.5× smaller). Tucker squares reach ~80.0–80.2% while CP circles trade ~2 pp for 2–3× extra parameter compression. FitNet and AT are the strongest distillation objectives across both pairs and both decompositions.</span>
+        </div>
+      </div>
+
+      <div class="fig-card reveal d2">
+        <img src="figures/resnet34_resnet18_imagenet100.png" alt="Bar chart comparing CP and Tucker student accuracy per distillation method on ResNet-34 to ResNet-18 ImageNet-100" loading="lazy">
+        <div class="fig-cap">
+          <strong>CP vs. Tucker per Distillation Method — ResNet-34→ResNet-18, ImageNet-100</strong>
+          <span>Tucker (orange) outperforms CP (blue) under every distillation objective. The gap narrows with KD (77.2 vs. 77.3) and widens with FitNet (78.5 vs. 80.2) and AT (79.5 vs. 80.1). Teacher accuracy is 81.7% (dashed). The best result — FitNet + Tucker — closes 75% of the accuracy gap to the teacher while using 6.6× fewer parameters.</span>
+        </div>
+      </div>
+
+      <div class="fig-card wide reveal d3">
+        <img src="figures/_overview_cifar100.png" alt="Accuracy vs parameters Pareto plot for all six CIFAR-100 teacher-student pairs" loading="lazy">
+        <div class="fig-cap">
+          <strong>Accuracy–Compression Pareto Frontier — CIFAR-100 (All 6 Pairs)</strong>
+          <span>All six CIFAR-100 teacher→student pairs on one canvas. Compression ratios are annotated per panel: the hardest pair (ResNet-32×4→WRN-16-2) reaches CP 64.0× / Tucker 21.9×. Tucker squares consistently land above CP circles; both decompositions beat vanilla KD when paired with FitNet or AT. Larger capacity gaps (ResNet-110→ResNet-20) show greater spread, confirming that distillation quality matters more under severe compression.</span>
+        </div>
+      </div>
+
+      <div class="fig-card wide reveal d3">
+        <img src="figures/_overview_imagenet100_cp.png" alt="Training convergence curves for CP student across both ImageNet-100 pairs over 100 epochs" loading="lazy">
+        <div class="fig-cap">
+          <strong>Training Convergence — CP Student, ImageNet-100</strong>
+          <span>Test Top-1 accuracy over 100 epochs for each distillation objective on both ImageNet-100 pairs. All methods converge stably after the learning-rate decay at epoch 30. KD and WSL+AT plateau around 77–78%; FitNet and AT consistently reach 78.5–79.5%. The CP student matches the convergence shape of a standard non-compressed student but at 16–18× fewer parameters.</span>
+        </div>
+      </div>
+
+      <div class="fig-card wide reveal d3">
+        <img src="figures/_overview_imagenet100_tucker.png" alt="Training convergence curves for Tucker student across both ImageNet-100 pairs over 100 epochs" loading="lazy">
+        <div class="fig-cap">
+          <strong>Training Convergence — Tucker Student, ImageNet-100</strong>
+          <span>Same setup as above but for the Tucker student. Tucker curves track 1–2 pp above CP throughout, converging to 79.9–80.2% at epoch 100 under FitNet/AT. Both students are trained simultaneously under one frozen teacher forward pass — Tucker's consistent advantage carries through with zero additional inference cost for the teacher.</span>
+        </div>
+      </div>
+
+      <div class="fig-card wide reveal d3">
+        <img src="figures/_overview_cifar100_cp.png" alt="Training convergence curves for CP student across all six CIFAR-100 pairs over 250 epochs" loading="lazy">
+        <div class="fig-cap">
+          <strong>Training Convergence — CP Student, CIFAR-100</strong>
+          <span>Six CIFAR-100 pairs trained for 250 epochs with cosine annealing. Easier same-family pairs (WRN-40-2→WRN-16-2) plateau near 75–76%; harder cross-architecture pairs (ResNet-110→ResNet-20) converge around 67–70%. After epoch 100 the objectives diverge slightly but rank consistently: KD &lt; WSL+AT &lt; AT ≈ FitNet. No overfitting is observed even at 250 epochs.</span>
+        </div>
+      </div>
+
+      <div class="fig-card wide reveal d3">
+        <img src="figures/_overview_cifar100_tucker.png" alt="Training convergence curves for Tucker student across all six CIFAR-100 pairs over 250 epochs" loading="lazy">
+        <div class="fig-cap">
+          <strong>Training Convergence — Tucker Student, CIFAR-100</strong>
+          <span>Tucker counterpart to the CP convergence grid above. Curves are systematically higher and exhibit tighter method-to-method variance — Tucker's larger capacity stabilises the distillation signal across objectives. The rank ordering of methods is preserved (FitNet/AT on top), confirming that Tucker's advantage is structural: it holds regardless of which distillation loss is used.</span>
         </div>
       </div>
     </div>
